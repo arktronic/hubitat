@@ -1,7 +1,14 @@
-import java.time.LocalDateTime
+/*
+    HTTP Environment Sensor for BME680 and similar sensors with HTTP server components
+    Copyright Arktronic
+    ISC License
+    
+    Note, a compatible HTTP server with a BME680 (or similar) is required.
+    CircuitPython code is provided as a sample here: https://github.com/arktronic/hubitat/blob/main/bme680/circuitpython/code.py
+*/
 
 metadata {
-  definition(name: "HTTP Environment Sensor", namespace: "arktronic", author: "Sasha Kotlyar") {
+  definition(name: "HTTP Environment Sensor", namespace: "arktronic", author: "Sasha Kotlyar", importUrl: "https://raw.githubusercontent.com/arktronic/hubitat/main/bme680/driver.groovy") {
     capability "PresenceSensor"
     capability "TemperatureMeasurement"
     capability "RelativeHumidityMeasurement"
