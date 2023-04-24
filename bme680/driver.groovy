@@ -14,6 +14,9 @@ metadata {
     capability "RelativeHumidityMeasurement"
     capability "PressureMeasurement"
     capability "AirQuality"
+    capability "Sensor"
+    
+    attribute "gasResistance", "number"
     
     command "refresh"
   }
@@ -60,6 +63,11 @@ def refresh() {
         if (resp.data["pressure_hpa"]) {
           result = ((resp.data["pressure_hpa"] as double) * 100).round()
           sendEvent(name: "pressure", value: result, unit: "Pa", descriptionText: "Pressure is ${result} Pa")
+        }
+
+        if (resp.data["gas_ohm"]) {
+          result = (resp.data["gas_ohm"] as int)
+          sendEvent(name: "gasResistance", value: result, unit: "Ω", descriptionText: "Gas resistence is ${result} Ω")
         }
 
         if (resp.data["aqi"]) {
