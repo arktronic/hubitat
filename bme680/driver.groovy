@@ -11,17 +11,17 @@ metadata {
     command "refresh"
   }
   preferences {
-		input name: "targetHttpAddress", type: "string", title: "<b>Target Server HTTP Address</b>", description: "For example: http://192.168.1.23:80", required: true
+    input name: "targetHttpAddress", type: "string", title: "<b>Target Server HTTP Address</b>", description: "For example: http://192.168.1.23:80", required: true
     input name: "autoPoll", type: "bool", title: "Enable Auto Poll", required: true, defaultValue: false
   }
 }
 
 def installed() {
-	configure()
+  configure()
 }
 
 def updated() {
-	configure()
+  configure()
 }
 
 def configure() {
