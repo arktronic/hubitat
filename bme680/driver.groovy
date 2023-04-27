@@ -22,7 +22,7 @@ metadata {
   }
   preferences {
     input name: "targetHttpAddress", type: "string", title: "<b>Target Server HTTP Address</b>", description: "For example: http://192.168.1.23:80", required: true
-    input name: "autoPoll", type: "bool", title: "Enable Auto Poll", required: true, defaultValue: false
+    input name: "autoPoll", type: "bool", title: "Enable Auto Poll", description: "Refreshes data every 2 minutes", required: true, defaultValue: false
   }
 }
 
@@ -39,11 +39,12 @@ def configure() {
   if (autoPoll) {
     Random rnd = new Random()
     def randomSeconds = rnd.nextInt(60)
-    schedule("${randomSeconds} * * * * ?", "refresh")
+    schedule("${randomSeconds} */2 * * * ?", "refresh")
   }
 }
 
 def refresh() {
+  state.clear()
   try {
     httpGet(settings.targetHttpAddress) { resp ->
       if (resp.success) {
@@ -53,25 +54,35 @@ def refresh() {
           result = (location.temperatureScale == "F") ? ((resp.data["temperature_c"] * 1.8) + 32) : resp.data["temperature_c"]
           result = (result as double).round(2)
           sendEvent(name: "temperature", value: result, unit: "°${location.temperatureScale}", descriptionText: "Temperature is ${result}°${location.temperatureScale}")
+        } else {
+          device.deleteCurrentState("temperature")
         }
 
         if (resp.data["humidity_percent"]) {
           result = (resp.data["humidity_percent"] as double).round()
           sendEvent(name: "humidity", value: result, descriptionText: "Humidity is ${result}%")
+        } else {
+          device.deleteCurrentState("humidity")
         }
 
         if (resp.data["pressure_hpa"]) {
           result = ((resp.data["pressure_hpa"] as double) * 100).round()
           sendEvent(name: "pressure", value: result, unit: "Pa", descriptionText: "Pressure is ${result} Pa")
+        } else {
+          device.deleteCurrentState("pressure")
         }
 
         if (resp.data["gas_ohm"]) {
           result = (resp.data["gas_ohm"] as int)
-          sendEvent(name: "gasResistance", value: result, unit: "Ω", descriptionText: "Gas resistence is ${result} Ω")
+          sendEvent(name: "gasResistance", value: result, unit: "Ω", descriptionText: "Gas resistance is ${result} Ω")
+        } else {
+          device.deleteCurrentState("gasResistance")
         }
 
-        if (resp.data["aqi"]) {
-          sendEvent(name: "airQualityIndex", value: resp.data["aqi"], descriptionText: "AQI is ${resp.data["aqi"]}")
+        if (resp.data["iaq"]) {
+          sendEvent(name: "airQualityIndex", value: resp.data["iaq"], descriptionText: "Indoor Air Quality (IAQ) is ${resp.data["iaq"]}")
+        } else {
+          device.deleteCurrentState("airQualityIndex")
         }
 
         resp.data.each { key, val ->
@@ -83,6 +94,11 @@ def refresh() {
     }
   } catch (Exception e) {
     log.warn "Call failed: ${e.message}"
+    device.deleteCurrentState("temperature")
+    device.deleteCurrentState("humidity")
+    device.deleteCurrentState("pressure")
+    device.deleteCurrentState("gasResistance")
+    device.deleteCurrentState("airQualityIndex")
     sendEvent(name: "presence", value: "not present")
   }
 }
