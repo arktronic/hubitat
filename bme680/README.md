@@ -33,7 +33,7 @@ Note, most ESP32 variants are supported by the BSEC2 library, but it is importan
 
 ## Directions
 
-1. Aquire necessary hardware and connect everything together
+1. Aquire necessary hardware and connect everything together (the JST SH cable should be used to connect the ESP32 and BME680 boards)
 2. Download and configure software/IDEs
 3. Flash either the CircuitPython code or the Arduino code (taking care to add/update Wi-Fi connection information)
 4. Verify it's working by accessing its IP address via a web browser (e.g., http://192.168.1.23)
