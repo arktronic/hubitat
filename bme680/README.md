@@ -10,7 +10,7 @@ Because there are very few ZigBee/Z-Wave sensors that will provide barometric pr
 
 ## Hardware
 
-The most "plug and play" version of hardware is listed below. There are many other compatible options.
+The most "plug and play" version of hardware is listed below. There are many other compatible options, especially if you are comfortable with soldering.
 
 - Hubitat Elevation device (obviously)
 - BME680 breakout board, like [this one](https://www.sparkfun.com/products/16466)
@@ -29,7 +29,7 @@ The most "plug and play" version of hardware is listed below. There are many oth
 - Arduino IDE
 - [Bosch BSEC2 library](https://github.com/BoschSensortec/Bosch-BSEC2-Library)
 
-Note, most ESP32 variants are supported by the BSEC2 library, but it is important to verify support for any particular board nonetheless.
+Note, most ESP32 variants are supported by the BSEC2 library, but you should still verify that you're getting something that will work with it.
 
 ## Directions
 
