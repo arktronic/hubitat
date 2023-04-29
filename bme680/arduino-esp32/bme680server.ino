@@ -86,6 +86,10 @@ void sendMessageChunk(WiFiClient& client, String chunk) {
   client.println(chunk);
 }
 
+void sendMessageChunk(WiFiClient& client, String jsonName, double jsonValue, String suffix = ",") {
+  sendMessageChunk(client, "\"" + jsonName + "\": " + String(jsonValue) + suffix);
+}
+
 void sendMessageChunk(WiFiClient& client, String jsonName, float jsonValue, String suffix = ",") {
   sendMessageChunk(client, "\"" + jsonName + "\": " + String(jsonValue) + suffix);
 }
@@ -138,7 +142,10 @@ void sendStatus(WiFiClient& client) {
   }
   sendMessageChunk(client, "bsec_version", bsecDataVersion);
   sendMessageChunk(client, "bsec_raw_status_code", (int)envSensor.status);
-  sendMessageChunk(client, "bme_raw_status_code",  (int)envSensor.sensor.status, "");
+  sendMessageChunk(client, "bme_raw_status_code",  (int)envSensor.sensor.status);
+  sendMessageChunk(client, "debug_free_heap", (int)ESP.getFreeHeap());
+  sendMessageChunk(client, "debug_free_psram", (int)ESP.getFreePsram());
+  sendMessageChunk(client, "debug_uptime_hrs", (double)1 * millis() / 3600000, "");
   sendMessageChunk(client, "}");
   sendMessageChunk(client, "");
 }
