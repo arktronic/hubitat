@@ -73,9 +73,9 @@ def batteryReport(batteryOk, batteryMilliVolts) {
   state.batteryOk = batteryOk
   state.batteryMilliVolts = batteryMilliVolts
   if (batteryOk < 1)
-    sendEvent(name: "battery", value: 1, descriptionText: "$device.displayName battery is low ($batteryMilliVolts mV)", type: "physical")
+    sendEvent(name: "battery", value: 1, unit: "%", descriptionText: "$device.displayName battery is low ($batteryMilliVolts mV)", type: "physical", isStateChange: true)
   else
-    sendEvent(name: "battery", value: 100, descriptionText: "$device.displayName battery is OK ($batteryMilliVolts mV)", type: "physical")
+    sendEvent(name: "battery", value: 100, unit: "%", descriptionText: "$device.displayName battery is OK ($batteryMilliVolts mV)", type: "physical", isStateChange: true)
 }
 
 def leakDetected() {
