@@ -56,7 +56,7 @@ def processIncomingEvent(eventName, eventDataMap)
 def batteryReport(batteryOk) {
   state.batteryOk = batteryOk
   if (batteryOk < 1)
-    sendEvent(name: "battery", value: 1, descriptionText: "$device.displayName battery is low", type: "physical")
+    sendEvent(name: "battery", value: 1, unit: "%", descriptionText: "$device.displayName battery is low", type: "physical", isStateChange: true)
   else
-    sendEvent(name: "battery", value: 100, descriptionText: "$device.displayName battery is OK", type: "physical")
+    sendEvent(name: "battery", value: 100, unit: "%", descriptionText: "$device.displayName battery is OK", type: "physical", isStateChange: true)
 }
