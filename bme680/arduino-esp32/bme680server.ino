@@ -293,6 +293,10 @@ void loop() {
   delay(100);
   esp_task_wdt_reset();
 
+  if (WiFi.status() != WL_CONNECTED) {
+    sos();
+  }
+
   WiFiClient client = server.available();
 
   if (client) {
