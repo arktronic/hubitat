@@ -1,10 +1,15 @@
 /*
-    HTTP Environment Sensor for BME680 and similar sensors with HTTP server components
+    HTTP Environment Sensor for sensors with HTTP server components
     Copyright Arktronic
     ISC License
     
-    Note, a compatible HTTP server with a BME680 (or similar) is required.
-    CircuitPython and Arduino code is provided as a sample here: https://github.com/arktronic/hubitat/tree/main/http-environment-sensors/bme680
+    Note, a compatible HTTP server is required.
+    CircuitPython and Arduino code is provided as a sample here: https://github.com/arktronic/hubitat/tree/main/http-environment-sensors
+
+    License: ISC
+
+    v0.2 - Add Airthings Wave Plus compatibility (radon, VOC, light level)
+    v0.1 - Initial release
 */
 
 metadata {
@@ -28,7 +33,7 @@ metadata {
   preferences {
     input name: "targetHttpAddress", type: "string", title: "<b>Target Server HTTP Address</b>", description: "For example: http://192.168.1.23:80", required: true
     input name: "autoPoll", type: "bool", title: "Enable Auto Poll", description: "Refreshes data every 2 minutes", required: true, defaultValue: false
-    input name: "radonUsePicocuriesPerLiter", type: "bool", title: "Use pCi/L for radon measurements", description: "Otherwise, use Bq/m³", required: true, defaultValue: true
+    input name: "radonUsePicocuriesPerLiter", type: "bool", title: "Use pCi/L for radon measurements", description: "(Otherwise, use Bq/m³)", required: true, defaultValue: true
   }
 }
 
