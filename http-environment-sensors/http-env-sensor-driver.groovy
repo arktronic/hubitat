@@ -4,11 +4,11 @@
     ISC License
     
     Note, a compatible HTTP server with a BME680 (or similar) is required.
-    CircuitPython code is provided as a sample here: https://github.com/arktronic/hubitat/blob/main/bme680/circuitpython/code.py
+    CircuitPython and Arduino code is provided as a sample here: https://github.com/arktronic/hubitat/tree/main/http-environment-sensors/bme680
 */
 
 metadata {
-  definition(name: "HTTP Environment Sensor", namespace: "arktronic", author: "Sasha Kotlyar", importUrl: "https://raw.githubusercontent.com/arktronic/hubitat/main/bme680/driver.groovy") {
+  definition(name: "HTTP Environment Sensor", namespace: "arktronic", author: "Sasha Kotlyar", importUrl: "https://raw.githubusercontent.com/arktronic/hubitat/main/http-environment-sensors/http-env-sensor-driver.groovy") {
     capability "PresenceSensor"
     capability "TemperatureMeasurement"
     capability "RelativeHumidityMeasurement"

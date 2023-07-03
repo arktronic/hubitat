@@ -35,7 +35,7 @@ Note, most ESP32 variants are supported by the BSEC2 library, but you should sti
 
 1. Aquire necessary hardware and connect everything together (the JST SH cable should be used to connect the ESP32 and BME680 boards)
 2. Download and configure software/IDEs
-3. Flash either the CircuitPython code or the Arduino code (taking care to add/update Wi-Fi connection information)
+3. Flash either the [CircuitPython code](circuitpython/) or the [Arduino code](arduino-esp32/bme680server.ino) (taking care to add/update Wi-Fi connection information)
 4. Verify it's working by accessing its IP address via a web browser (e.g., http://192.168.1.23)
 5. Ensure the IP address has a static lease (i.e., will not change between reboots)
 6. Install the Hubitat driver and create a device, pointing to the configured IP address
