@@ -15,14 +15,20 @@ metadata {
     capability "PressureMeasurement"
     capability "AirQuality"
     capability "Sensor"
+    capability "CarbonDioxideMeasurement"
+    capability "IlluminanceMeasurement"
     
     attribute "gasResistance", "number"
+    attribute "radon", "number"
+    attribute "longTermRadon", "number"
+    attribute "voc", "number"
     
     command "refresh"
   }
   preferences {
     input name: "targetHttpAddress", type: "string", title: "<b>Target Server HTTP Address</b>", description: "For example: http://192.168.1.23:80", required: true
     input name: "autoPoll", type: "bool", title: "Enable Auto Poll", description: "Refreshes data every 2 minutes", required: true, defaultValue: false
+    input name: "radonUsePicocuriesPerLiter", type: "bool", title: "Use pCi/L for radon measurements", description: "Otherwise, use Bq/m³", required: true, defaultValue: true
   }
 }
 
@@ -51,7 +57,7 @@ def refresh() {
         sendEvent(name: "presence", value: "present")
 
         if (resp.data["temperature_c"]) {
-          result = (location.temperatureScale == "F") ? ((resp.data["temperature_c"] * 1.8) + 32) : resp.data["temperature_c"]
+          result = (location.temperatureScale == "F") ? celsiusToFahrenheit(resp.data["temperature_c"]) : resp.data["temperature_c"]
           result = (result as double).round(2)
           sendEvent(name: "temperature", value: result, unit: "°${location.temperatureScale}", descriptionText: "Temperature is ${result}°${location.temperatureScale}")
         } else {
@@ -83,6 +89,45 @@ def refresh() {
           sendEvent(name: "airQualityIndex", value: resp.data["iaq"], descriptionText: "Indoor Air Quality (IAQ) is ${resp.data["iaq"]}")
         } else {
           device.deleteCurrentState("airQualityIndex")
+        }
+
+        if (resp.data["co2_ppm"]) {
+          result = (resp.data["co2_ppm"] as int)
+          sendEvent(name: "carbonDioxide", value: result, unit: "ppm", descriptionText: "Carbon dioxide is ${result} ppm")
+        } else {
+          device.deleteCurrentState("carbonDioxide")
+        }
+
+        if (resp.data["radon_bq_m3"]) {
+          result = (resp.data["radon_bq_m3"] as int) / (radonUsePicocuriesPerLiter ? 37.0 : 1.0)
+          result = (result as double).round(2)
+          rnUnit = (settings.radonUsePicocuriesPerLiter ? "pCi/L" : "Bq/m³")
+          sendEvent(name: "radon", value: result, unit: rnUnit, descriptionText: "Radon level is ${result} ${rnUnit}")
+        } else {
+          device.deleteCurrentState("radon")
+        }
+
+        if (resp.data["long_term_radon_bq_m3"]) {
+          result = (resp.data["long_term_radon_bq_m3"] as int) / (radonUsePicocuriesPerLiter ? 37.0 : 1.0)
+          result = (result as double).round(2)
+          rnUnit = (settings.radonUsePicocuriesPerLiter ? "pCi/L" : "Bq/m³")
+          sendEvent(name: "longTermRadon", value: result, unit: rnUnit, descriptionText: "Long term radon level is ${result} ${rnUnit}")
+        } else {
+          device.deleteCurrentState("longTermRadon")
+        }
+
+        if (resp.data["voc_ppb"]) {
+          result = (resp.data["voc_ppb"] as int)
+          sendEvent(name: "voc", value: result, unit: "ppb", descriptionText: "VOC level is ${result} ppb")
+        } else {
+          device.deleteCurrentState("voc")
+        }
+
+        if (resp.data["light_level"]) {
+          result = (resp.data["light_level"] as int)
+          sendEvent(name: "illuminance", value: result, descriptionText: "Light level is ${result}")
+        } else {
+          device.deleteCurrentState("illuminance")
         }
 
         resp.data.each { key, val ->
