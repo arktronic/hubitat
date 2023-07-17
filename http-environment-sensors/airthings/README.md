@@ -20,7 +20,7 @@ Because radon monitoring is important, and there don't appear to be any ZigBee o
 
 ## Directions
 
-1. Aquire necessary hardware
+1. Acquire necessary hardware
 2. Download and configure software/IDEs
 3. Flash the [Arduino code](airthingsbridge.ino) (taking care to add/update Wi-Fi connection information)
 4. Verify it's working by accessing its IP address via a web browser (e.g., http://192.168.1.23)
