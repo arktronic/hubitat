@@ -8,10 +8,29 @@ Create a Hubitat Elevation device with this driver. Child Devices will be create
 License: ISC
 
 v0.1 - Initial release
+v0.2 - Rework DNI and classification of devices
 
 */
 
 import java.time.LocalDateTime
+import groovy.transform.Field
+
+@Field static DEVICES_BY_ID = [
+  "Govee Water Leak Detector H5054 [Govee-Water]": "Govee-Water",
+  "Rubicson Temperature Sensor [Rubicson-Temperature]": "Rubicson-Temperature",
+  "Generic Trigger": "__rtl433_generic_trigger__"
+]
+
+@Field static DEVICES_BY_ID_AND_CHANNEL = [
+  "Acurite Temperature Humidity Sensor [Acurite-Tower]": "Acurite-Tower"
+]
+
+@Field static ALL_DEVICES_TO_DRIVER_NAMES = [
+  "Govee Water Leak Detector H5054 [Govee-Water]": "rtl_433 Child Device Govee Water Leak Detector H5054",
+  "Rubicson Temperature Sensor [Rubicson-Temperature]": "rtl_433 Child Device Rubicson Temperature Sensor",
+  "Generic Trigger": "rtl_433 Child Device Generic Trigger",
+  "Acurite Temperature Humidity Sensor [Acurite-Tower]": "rtl_433 Child Device Acurite Temperature Humidity Sensor"
+]
 
 metadata {
   definition(name: "rtl_433 Parent Device", namespace: "arktronic", author: "Sasha Kotlyar") {
@@ -20,14 +39,14 @@ metadata {
     command "addNewDeviceById", [
       [name:"id *", type: "STRING", description: "Unique identifier", required: true],
       [name:"label *", type: "STRING", description: "Friendly name for this device", required: true],
-      [name:"Device type *", type: "ENUM", description: "Choose one", constraints: ["Govee Water Leak Detector H5054", "Rubicson Temperature Sensor", "Generic Trigger"], required: true]
+      [name:"Device type *", type: "ENUM", description: "Choose one", constraints: DEVICES_BY_ID.keySet(), required: true]
     ]
 
     command "addNewDeviceByIdAndChannel", [
       [name:"id *", type: "STRING", description: "Unique identifier", required: true],
       [name:"channel *", type: "STRING", description: "Channel", required: true],
       [name:"label *", type: "STRING", description: "Friendly name for this device", required: true],
-      [name:"Device type *", type: "ENUM", description: "Choose one", constraints: ["Acurite Temperature Humidity Sensor"], required: true]
+      [name:"Device type *", type: "ENUM", description: "Choose one", constraints: DEVICES_BY_ID_AND_CHANNEL.keySet(), required: true]
     ]
   }
 
@@ -65,11 +84,15 @@ def deriveChildDNI(String id, String channel, String deviceType) {
 }
 
 def addNewDeviceById(String id, String label, String deviceType) {
-  addChildDevice("arktronic", "rtl_433 Child Device ${deviceType}", deriveChildDNI(id, deviceType), [label: label])
+  dniTypeCode = DEVICES_BY_ID[deviceType]
+  driverName = ALL_DEVICES_TO_DRIVER_NAMES[deviceType]
+  addChildDevice("arktronic", driverName, deriveChildDNI(id, dniTypeCode), [label: label])
 }
 
 def addNewDeviceByIdAndChannel(String id, String channel, String label, String deviceType) {
-  addChildDevice("arktronic", "rtl_433 Child Device ${deviceType}", deriveChildDNI(id, channel, deviceType), [label: label])
+  dniTypeCode = DEVICES_BY_ID_AND_CHANNEL[deviceType]
+  driverName = ALL_DEVICES_TO_DRIVER_NAMES[deviceType]
+  addChildDevice("arktronic", driverName, deriveChildDNI(id, channel, dniTypeCode), [label: label])
 }
 
 def parse(String description) {
@@ -78,38 +101,32 @@ def parse(String description) {
   if (logEnable) log.debug "Message received: ${msg.body}"
 
   def json = parseJson(msg.body)
+  def jsonModel = (json["model"] ? json["model"].toString() : "")
   def jsonId = (json["id"] ? json["id"].toString() : "")
+  def jsonChannel = (json["channel"] ? json["channel"].toString() : "")
 
   if (json["heartbeat_rtl_433"] != null) {
     // This is a heartbeat message from the rtl_433 host
     state.lastReceivedHeartbeat = json["heartbeat_rtl_433"]
     state.lastReceivedHeartbeatDate = new Date((json["heartbeat_rtl_433"] as long) * 1000).format("EEE, d MMM yyyy HH:mm:ss Z")
-  } else if (json["model"] == "Govee-Water" && jsonId) {
-    def childDevice = getChildDevice(deriveChildDNI(jsonId, "Govee Water Leak Detector H5054"))
+  } else if (jsonId && jsonModel && DEVICES_BY_ID.values().any { el -> el == jsonModel }) {
+    def childDevice = getChildDevice(deriveChildDNI(jsonId, jsonModel))
     if (childDevice != null) {
       if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
       childDevice.processIncomingEvent(json["event"], json)
     } else {
-      if (logEnable) log.debug "No child device found for ${json["model"]} ${jsonId}"
+      if (logEnable) log.debug "No child device found for ${jsonModel} ${jsonId}"
     }
-  } else if (json["model"] == "Rubicson-Temperature" && jsonId) {
-    def childDevice = getChildDevice(deriveChildDNI(jsonId, "Rubicson Temperature Sensor"))
+  } else if (jsonId && jsonModel && jsonChannel && DEVICES_BY_ID_AND_CHANNEL.values().any { el -> el == jsonModel }) {
+    def childDevice = getChildDevice(deriveChildDNI(jsonId, jsonChannel, jsonModel))
     if (childDevice != null) {
       if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
       childDevice.processIncomingEvent(json["event"], json)
     } else {
-      if (logEnable) log.debug "No child device found for ${json["model"]} ${jsonId}"
-    }
-  } else if (json["model"] == "Acurite-Tower" && jsonId && json["channel"].toString()) {
-    def childDevice = getChildDevice(deriveChildDNI(jsonId, json["channel"].toString(), "Acurite Temperature Humidity Sensor"))
-    if (childDevice != null) {
-      if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
-      childDevice.processIncomingEvent(json["event"], json)
-    } else {
-      if (logEnable) log.debug "No child device found for ${json["model"]} ${jsonId} ${json["channel"]}"
+      if (logEnable) log.debug "No child device found for ${jsonModel} ${jsonId} ${jsonChannel}"
     }
   } else if (jsonId) {
-    def childDevice = getChildDevice(deriveChildDNI(jsonId, "Generic Trigger"))
+    def childDevice = getChildDevice(deriveChildDNI(jsonId, "__rtl433_generic_trigger__"))
     if (childDevice != null) {
       if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
       childDevice.processIncomingEvent(json["event"], json)
