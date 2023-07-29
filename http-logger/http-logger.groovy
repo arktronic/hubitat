@@ -25,7 +25,7 @@ definition(
     name: "HTTP Logger",
     namespace: "arktronic",
     author: "Sasha Kotlyar",
-    description: "Log device states to HTTP endpoint",
+    description: "Log device states to an HTTP endpoint as JSON data",
     category: "Utility",
     importUrl: "https://raw.githubusercontent.com/arktronic/hubitat/http-logger/main/http-logger.groovy",
     iconUrl: "",
@@ -179,7 +179,6 @@ def setupMain() {
             if (prefSoftPollingInterval?.toInteger()) {
                 input "prefPostHubInfo", "bool", title:"Post Hub information (IP, firmware, uptime, mode, sunrise/sunset)", defaultValue: false
             }
-            input "includeHubInfo", "bool", title:"Include Hub Name as a tag for device events", defaultValue: true
             input "filterEvents", "bool", title:"Only post device events when the data value changes", defaultValue: true
         }
 
@@ -214,7 +213,7 @@ def connectionPage() {
     dynamicPage(name: "connectionPage", title: "Connection Properties", install: false, uninstall: false) {
         section {
             input "prefHttpEndpoint", "text", title: "HTTP endpoint (e.g., https://192.168.1.23/events)", defaultValue: "", required: true
-            input "prefIgnoreSSLIssues", "bool", title:"Ignore TLS certificate validation issues", defaultValue: false, required: true
+            input "prefIgnoreSSLIssues", "bool", title: "Ignore TLS certificate validation issues (if HTTPS)", defaultValue: false, required: true
 
             input(
                 name: "prefAuthType",
@@ -229,11 +228,11 @@ def connectionPage() {
                 submitOnChange: true
             )
             if (prefAuthType == "basic") {
-                input "prefDatabaseUser", "text", title: "Username", defaultValue: "", required: true
-                input "prefDatabasePass", "text", title: "Password", defaultValue: "", required: true
+                input "prefAuthUser", "text", title: "Username", defaultValue: "", required: true
+                input "prefAuthPass", "text", title: "Password", defaultValue: "", required: true
             }
             else if (prefAuthType == "token") {
-                input "prefDatabaseToken", "text", title: "Token", required: true
+                input "prefAuthToken", "text", title: "Token", required: true
             }
         }
     }
@@ -297,7 +296,6 @@ void updated() {
     unschedule()
 
     // Set up softpoll if requested
-    // NB: This is called softPoll to maintain backward compatibility wirh prior versions
     state.softPollingInterval = settings.prefSoftPollingInterval.toInteger()
     switch (state.softPollingInterval) {
         case 1:
@@ -324,7 +322,7 @@ void updated() {
     }
 
     // Flush any pending batch
-    runIn(1, writeQueuedDataToInfluxDb)
+    runIn(1, writeQueuedDataToHttpEndpoint)
 }
 
 /**
@@ -369,278 +367,73 @@ void hubRestartHandler(evt) {
     }
 
     if (state.loggerQueue?.size()) {
-        runIn(60, writeQueuedDataToInfluxDb)
+        runIn(60, writeQueuedDataToHttpEndpoint)
     }
 }
 
 /**
- *  encodeDeviceEvent(evt)
+ *  createDeviceEvent(evt, isSoftPoll, extra)
  *
- *  Builds data to send to InfluxDB.
- *   - Escapes and quotes string values.
- *   - Calculates logical binary values where string values can be
- *     represented as binary values (e.g. contact: closed = 1, open = 0)
+ *  Builds data to send to the HTTP endpoint.
  **/
-private String encodeDeviceEvent(evt) {
-    //
-    // This switch handles special processing for various events types
-    //
-    // Entries in the switch may optionally set the unit, value, or valueBinary fields.
-    // Any fields set in the switch are "final" and do not receive further processing,
-    // so all field assignments must be escaped as necessary.
-    //
-    // If not set in the switch, the unit and value fields will be defaulted as follows:
-    //
-    //   Unit:   If valueBinary has been set in the switch, the unit tag will be the
-    //           will be set to the name of the event (evt.name). Otherwise, the unit
-    //           tag will be set to the unit of the event (evt.unit). Both will be
-    //           escaped.
-    //   Value:  If the value in the event (evt.value) is a valid number, the value
-    //           will be InfluxDB's default numeric type (float). Othersie, the value
-    //           will be escaped and inclosed in double quotes as a string.
-    //
-    String unit = ''
-    String value = ''
-    String valueBinary = ''
-    switch (evt.name) {
-        case 'acceleration':
-            // binary value: active = 1, <any other value> = 0
-            valueBinary = (evt.value == 'active') ? '1i' : '0i'
-            break
-        case 'alarm':
-            // binary value: <any other value> = 1, off = 0
-            valueBinary = (evt.value == 'off') ? '0i' : '1i'
-            break
-        case 'carbonMonoxide':
-            // binary value: detected = 1, <any other value> = 0
-            valueBinary = (evt.value == 'detected') ? '1i' : '0i'
-            break
-        case 'consumableStatus':
-            // binary value: good = 1, <any other value> = 0
-            valueBinary = (evt.value == 'good') ? '1i' : '0i'
-            break
-        case 'contact':
-            // binary value: closed = 1, <any other value> = 0
-            valueBinary = (evt.value == 'closed') ? '1i' : '0i'
-            break
-        case 'door':
-            // binary value: closed = 1, <any other value> = 0
-            valueBinary = (evt.value == 'closed') ? '1i' : '0i'
-            break
-        case 'filterStatus':
-            // binary value: normal = 1, <any other value> = 0
-            valueBinary = (evt.value == 'normal') ? '1i' : '0i'
-            break
-        case 'lock':
-            // binary value: locked = 1, <any other value> = 0
-            valueBinary = (evt.value == 'locked') ? '1i' : '0i'
-            break
-        case 'motion':
-            // binary value: active = 1, <any other value> = 0
-            valueBinary = (evt.value == 'active') ? '1i' : '0i'
-            break
-        case 'mute':
-            // binary value: muted = 1, <any other value> = 0
-            valueBinary = (evt.value == 'muted') ? '1i' : '0i'
-            break
-        case 'naturalGas':
-            // binary value: detected = 1, <any other value> = 0
-            valueBinary = (evt.value == 'detected') ? '1i' : '0i'
-            break
-        case 'powerSource':
-            // binary value: mains = 1, <any other value> = 0
-            valueBinary = (evt.value == 'mains') ? '1i' : '0i'
-            break
-        case 'presence':
-            // binary value: present = 1, <any other value> = 0
-            valueBinary = (evt.value == 'present') ? '1i' : '0i'
-            break
-        case 'shock':
-            // binary value: detected = 1, <any other value> = 0
-            valueBinary = (evt.value == 'detected') ? '1i' : '0i'
-            break
-        case 'sleeping':
-            // binary value: sleeping = 1, <any other value> = 0
-            valueBinary = (evt.value == 'sleeping') ? '1i' : '0i'
-            break
-        case 'smoke':
-            // binary value: detected = 1, <any other value> = 0
-            valueBinary = (evt.value == 'detected') ? '1i' : '0i'
-            break
-        case 'sound':
-            // binary value: detected = 1, <any other value> = 0
-            valueBinary = (evt.value == 'detected') ? '1i' : '0i'
-            break
-        case 'switch':
-            // binary value: on = 1, <any other value> = 0
-            valueBinary = (evt.value == 'on') ? '1i' : '0i'
-            break
-        case 'tamper':
-            // binary value: detected = 1, <any other value> = 0
-            valueBinary = (evt.value == 'detected') ? '1i' : '0i'
-            break
-        case 'thermostatMode':
-            // binary value: <any other value> = 1, off = 0
-            valueBinary = (evt.value == 'off') ? '0i' : '1i'
-            break
-        case 'thermostatFanMode':
-            // binary value: <any other value> = 1, auto = 0
-            valueBinary = (evt.value == 'auto') ? '0i' : '1i'
-            break
-        case 'thermostatOperatingState':
-            // binary value: heating or cooling = 1, <any other value> = 0
-            valueBinary = (evt.value == 'heating' || evt.value == 'cooling') ? '1i' : '0i'
-            break
-        case 'thermostatSetpointMode':
-            // binary value: followSchedule = 0, <any other value> = 1
-            valueBinary = (evt.value == 'followSchedule') ? '0i' : '1i'
-            break
-        case 'threeAxis':
-            // threeAxis: Format to x,y,z values
-            unit = evt.name
-            try {
-                /* groovylint-disable-next-line UnusedVariable, VariableName */
-                def (_,x,y,z) = (evt.value =~ /^\[x:(-?[0-9]{1,3}),y:(-?[0-9]{1,3}),z:(-?[0-9]{1,3})\]$/)[0]
-                value = "valueX=${x}i,valueY=${y}i,valueZ=${z}i" // values are integers
-            }
-            catch (e) {
-                value = "valueX=0i,valueY=0i,valueZ=0i"
-                logger("Invalid threeAxis format: ${evt.value}", logWarn)
-            }
-            break
-        case 'touch':
-            // binary value: touched = 1, <any other value> = 0
-            valueBinary = (evt.value == 'touched') ? '1i' : '0i'
-            break
-        case 'valve':
-            // binary value: open = 1, <any other value> = 0
-            valueBinary = (evt.value == 'open') ? '1i' : '0i'
-            break
-        case 'water':
-            // binary value: wet = 1, <any other value> = 0
-            valueBinary = (evt.value == 'wet') ? '1i' : '0i'
-            break
-        case 'windowShade':
-            // binary value: closed = 1, <any other value> = 0
-            valueBinary = (evt.value == 'closed') ? '1i' : '0i'
-            break
-
-        // The Mysterious Case of The Button
-        // binary value: released = 0, <any other value> = 1
-        // Note that button attributes are excluded from softpoll
-        case 'doubleTapped':
-        case 'held':
-        case 'pushed':
-            unit = 'button'
-            valueBinary = '1i'
-            break
-        case 'released':
-            unit = 'button'
-            valueBinary = '0i'
-            break
-    }
-
-    // If a unit tag has not been assigned above, assign it from the event.
-    if (!unit) {
-        if (valueBinary) {
-            // If a binary value was set, use the event name as the unit tag.
-            unit = escapeStringForInfluxDB(evt.name)
-        }
-        else if (evt.unit) {
-            // Otherwise, use the event unit if defined.
-            unit = escapeStringForInfluxDB(evt.unit)
-        }
-    }
-
-    // If a value has not been assigned above, assign it from the event value.
-    if (!value) {
-        if (evt.value.isNumber()) {
-            // It's a number. Common numerical events such as carbonDioxide, power, energy,
-            // humidity, level, temperature, ultravioletIndex, voltage, etc. are handled here.
-            value = evt.value
-        }
-        else {
-            // Everything else is a string.
-            value = '"' + escapeStringForInfluxDB(evt.value) + '"'
-        }
-    }
-
-    // Build the data string to send to InfluxDB:
-    //  Format: <measurement>[,<tag_name>=<tag_value>] field=<field_value>
-    //    If value is an integer, it must have a trailing "i"
-    //    If value is a string, it must be enclosed in double quotes.
-    String measurement = escapeStringForInfluxDB((evt.name))
-    String deviceId = evt.deviceId
-    String deviceName = escapeStringForInfluxDB(evt.displayName)
-    String data = "${measurement},deviceName=${deviceName},deviceId=${deviceId}"
-
-    // Add hub name (location) tag if requested
-    if (settings.includeHubInfo == null || settings.includeHubInfo) {
-        String hubName = escapeStringForInfluxDB(location.name)
-        data += ",hubName=${hubName}"
-    }
-
-    // Add the unit and value(s)
-    if (unit) {
-        data += ",unit=${unit}"
-    }
-    if (value ==~ /^value.*/) {
-        // Assignment has already been done above (e.g. threeAxis)
-        data += " ${value}"
-    }
-    else {
-        data += " value=${value}"
-    }
-    if (valueBinary) {
-        data += ",valueBinary=${valueBinary}"
-    }
-
-    // Add the event timestamp
-    long eventTimestamp = evt.unixTime * 1e6 // milliseconds to nanoseconds
-    data += " ${eventTimestamp}"
-
-    // Return the completed string
-    return(data)
+private Map createDeviceEvent(evt, isSoftPoll, extra) {
+    def map = [
+        deviceId: evt.deviceId,
+        deviceName: evt.displayName,
+        event: evt.name,
+        value: evt.value.toString(),
+        unit: evt.unit.toString(),
+        timestamp: evt.unixTime,
+        hub: location.name,
+        polled: isSoftPoll,
+        extra: extra
+    ]
+    return map
 }
 
 /**
  *  handleEvent(evt)
  *
- *  Builds data to send to InfluxDB.
- *   - Escapes and quotes string values.
- *   - Calculates logical binary values where string values can be
- *     represented as binary values (e.g. contact: closed = 1, open = 0)
+ *  Enqueues live data to be sent to the HTTP endpoint.
  **/
 void handleEvent(evt) {
     logger("Handle Event: ${evt}", logDebug)
 
-    // Encode the event
-    data = encodeDeviceEvent(evt)
+    // Create the event
+    data = createDeviceEvent(evt, false, null)
 
-    // Add event to the queue for InfluxDB
-    queueToInfluxDb([data])
+    // Add event to the queue
+    enqueueEvents([data])
 }
 
 /**
- *  encodeHubInfo(evt)
+ *  createHubInfoEvent(evt, isSoftPoll)
  *
- *  Build a Hub Information record.
+ *  Build a Hub Information record with an optional mode event.
  **/
-private String encodeHubInfo(evt) {
-    String hubName = escapeStringForInfluxDB(location.name)
-    String localIP = escapeStringForInfluxDB(location.hub.localIP)
-    String firmwareVersion = escapeStringForInfluxDB(location.hub.firmwareVersionString)
-    String upTime = escapeStringForInfluxDB(location.hub.uptime.toString())
-    String mode = escapeStringForInfluxDB(evt?.value ? evt.value : location.getMode())
-
+private Map createHubInfoEvent(evt, isSoftPoll) {
     def times = getSunriseAndSunset()
-    String sunriseTime = escapeStringForInfluxDB(times.sunrise.format("HH:mm", location.timeZone))
-    String sunsetTime = escapeStringForInfluxDB(times.sunset.format("HH:mm", location.timeZone))
+    String sunriseTime = times.sunrise.format("HH:mm", location.timeZone)
+    String sunsetTime = times.sunset.format("HH:mm", location.timeZone)
 
-    Long eventTimestamp = (evt?.unixTime ? evt.unixTime : now()) * 1e6       // Time is in milliseconds, but InfluxDB expects nanoseconds
+    hubData = [
+        localIP: location.hub.localIP,
+        firmware: location.hub.firmwareVersionString,
+        uptimeSeconds: location.hub.uptime,
+        sunrise: sunriseTime,
+        sunset: sunsetTime
+    ]
 
-    String data = "_hubInfo,hubName=${hubName} localIP=\"${localIP}\",firmwareVersion=\"${firmwareVersion}\",upTime=\"${upTime}\",mode=\"${mode}\",sunriseTime=\"${sunriseTime}\",sunsetTime=\"${sunsetTime}\" ${eventTimestamp}"
-    return data
+    event = createDeviceEvent([
+        name: (evt ? "_hubModeChange" : "_hubInfo"),
+        value: (evt?.value ? evt.value : location.getMode()),
+        unit: "",
+        deviceId: -1,
+        displayName: "_hubInfo",
+        unixTime: (evt?.unixTime ? evt.unixTime : now())
+    ], isSoftPoll, groovy.json.JsonOutput.toJson(hubData))
+
+    return event
 }
 
 /**
@@ -652,19 +445,16 @@ void handleModeEvent(evt) {
     logger("Handle Mode Event: ${evt}", logDebug)
 
     // Encode the event
-    data = encodeHubInfo(evt)
+    data = createHubInfoEvent(evt, false)
 
-    // Add event to the queue for InfluxDB
-    queueToInfluxDb([data])
+    // Add event to the queue
+    enqueueEvents([data])
 }
 
 /**
  *  softPoll()
  *
- *  Re-queues last value to InfluxDB unless an event has already been seen in the last softPollingInterval.
- *  Also calls LogSystemProperties().
- *
- *  NB: Function name softPoll must be kept for backward compatibility
+ *  Re-queues last value unless an event has already been seen in the last softPollingInterval.
  **/
 void softPoll() {
     logger("Keepalive check", logDebug)
@@ -674,7 +464,7 @@ void softPoll() {
 
     // Create the list
     Long timeNow = now()
-    List<String> eventList = []
+    List<Map> eventList = []
     deviceAttrMap.each { device, attrList ->
         attrList.each { attr ->
             if (momentaryAttributes.contains(attr)) {
@@ -685,7 +475,7 @@ void softPoll() {
                 Integer activityMinutes = (timeNow - device.latestState(attr).date.time) / 60000
                 if (activityMinutes > state.softPollingInterval) {
                     logger("Keep alive for device ${device}(${attr})", logDebug)
-                    event = encodeDeviceEvent([
+                    event = createDeviceEvent([
                         name: attr,
                         value: device.latestState(attr).value,
                         unit: device.latestState(attr).unit,
@@ -693,7 +483,7 @@ void softPoll() {
                         deviceId: device.id,
                         displayName: device.displayName,
                         unixTime: timeNow
-                    ])
+                    ], true, null)
                     eventList.add(event)
                 }
                 else {
@@ -708,19 +498,19 @@ void softPoll() {
 
     // Add a hub information record if requested
     if (settings.prefPostHubInfo) {
-        eventList.add(encodeHubInfo(null))
+        eventList.add(createHubInfoEvent(null, true))
     }
 
     // Queue the events
-    queueToInfluxDb(eventList)
+    enqueueEvents(eventList)
 }
 
 /**
- *  queueToInfluxDb()
+ *  enqueueEvents()
  *
- *  Adds events to the InfluxDB queue.
+ *  Adds events to the queue.
  **/
-private void queueToInfluxDb(List<String> eventList) {
+private void enqueueEvents(List<Map> eventList) {
     if (state.loggerQueue == null) {
         // Failsafe if coming from an old version
         state.loggerQueue = []
@@ -736,18 +526,16 @@ private void queueToInfluxDb(List<String> eventList) {
     // If this is the first data in the batch, trigger the timer
     if (priorLoggerQueueSize == 0) {
         logger("Scheduling batch", logDebug)
-        runIn(settings.prefBatchTimeLimit, writeQueuedDataToInfluxDb)
+        runIn(settings.prefBatchTimeLimit, writeQueuedDataToHttpEndpoint)
     }
 }
 
 /**
- *  writeQueuedDataToInfluxDb()
+ *  writeQueuedDataToHttpEndpoint()
  *
- *  Posts data to InfluxDB queue.
- *
- *  NB: Function name writeQueuedDataToInfluxDb must be kept for backward compatibility
+ *  Posts data to the configured HTTP endpoint.
 **/
-void writeQueuedDataToInfluxDb() {
+void writeQueuedDataToHttpEndpoint() {
     if (state.loggerQueue == null) {
         // Failsafe if coming from an old version
         return
@@ -758,7 +546,7 @@ void writeQueuedDataToInfluxDb() {
     }
 
     Integer loggerQueueSize = state.loggerQueue.size()
-    logger("Number of events queued for InfluxDB: ${loggerQueueSize}", logDebug)
+    logger("Number of queued events: ${loggerQueueSize}", logDebug)
     if (loggerQueueSize == 0) {
         return
     }
@@ -771,11 +559,11 @@ void writeQueuedDataToInfluxDb() {
         logger("Post of ${postCount} events already running (elapsed ${elapsed}ms)", logDebug)
         if (elapsed < 90000) {
             // Come back later
-            runIn(30, writeQueuedDataToInfluxDb)
+            runIn(30, writeQueuedDataToHttpEndpoint)
             return
         }
 
-        // Failsafe in case handleInfluxResponse doesn't get called for some reason such as reboot
+        // Failsafe in case handleHttpResponse doesn't get called for some reason such as reboot
         logger("Post callback failsafe timeout", logDebug)
         state.postCount = 0
 
@@ -788,16 +576,16 @@ void writeQueuedDataToInfluxDb() {
 
     // If we have a backlog, log a warning
     if (loggerQueueSize > settings.prefBacklogLimit) {
-        logger("Backlog of ${loggerQueueSize} events queued for InfluxDB", logWarn)
+        logger("Backlog of ${loggerQueueSize} queued events", logWarn)
     }
 
     postCount = loggerQueueSize < settings.prefBatchSizeLimit ? loggerQueueSize : settings.prefBatchSizeLimit
     state.postCount = postCount
     state.lastPost = timeNow
 
-    String data = state.loggerQueue.subList(0, postCount).toArray().join('\n')
+    String data = groovy.json.JsonOutput.toJson(state.loggerQueue.subList(0, postCount).toArray())
     // Uncommenting the following line will eventually drive your hub into the ground. Don't do it.
-    // logger("Posting data to InfluxDB: ${state.uri}, Data: [${data}]", logDebug)
+    // logger("Posting data to HTTP endpoint: ${state.uri}, Data: [${data}]", logDebug)
 
     // Post it
     def postParams = [
@@ -809,17 +597,15 @@ void writeQueuedDataToInfluxDb() {
         timeout: 60,
         body: data
     ]
-    asynchttpPost('handleInfluxResponse', postParams, [ postTime: timeNow ])
+    asynchttpPost('handleHttpResponse', postParams, [ postTime: timeNow ])
 }
 
 /**
- *  handleInfluxResponse()
+ *  handleHttpResponse()
  *
- *  Handles response from post made in writeQueuedDataToInfluxDb().
- *
- *  NB: Function name handleInfluxResponse must be kept for backward compatibility
+ *  Handles response from post made in writeQueuedDataToHttpEndpoint().
  **/
-void handleInfluxResponse(hubResponse, closure) {
+void handleHttpResponse(hubResponse, closure) {
     if (state.loggerQueue == null) {
         // Failsafe if coming from an old version
         return
@@ -844,7 +630,7 @@ void handleInfluxResponse(hubResponse, closure) {
             }
 
             // Try again later
-            runIn(60, writeQueuedDataToInfluxDb)
+            runIn(60, writeQueuedDataToHttpEndpoint)
             return
         }
 
@@ -856,7 +642,7 @@ void handleInfluxResponse(hubResponse, closure) {
 
     // Go again?
     if (state.loggerQueue.size()) {
-        runIn(1, writeQueuedDataToInfluxDb)
+        runIn(1, writeQueuedDataToHttpEndpoint)
     }
 }
 
@@ -877,13 +663,13 @@ private String uriString() {
 private void setUpEndpointConnectionInfo() {
     def headers = [:]
     if (settings.prefAuthType == null || settings.prefAuthType == "basic") {
-        if (settings.prefDatabaseUser && settings.prefDatabasePass) {
-            String userpass = "${settings.prefDatabaseUser}:${settings.prefDatabasePass}"
+        if (settings.prefAuthUser && settings.prefAuthPass) {
+            String userpass = "${settings.prefAuthUser}:${settings.prefAuthPass}"
             headers.put("Authorization", "Basic " + userpass.bytes.encodeBase64())
         }
     }
     else if (settings.prefAuthType == "token") {
-        headers.put("Authorization", "Token ${settings.prefDatabaseToken}")
+        headers.put("Authorization", "Token ${settings.prefAuthToken}")
     }
 
     state.uri = uriString()
@@ -915,28 +701,4 @@ private void logger(String msg, Integer level = logDebug) {
             log.debug msg
             break
     }
-}
-
-/**
- *  escapeStringForInfluxDB()
- *
- *  Escape values to InfluxDB.
- *
- *  If a tag key, tag value, or field key contains a space, comma, or an equals sign = it must
- *  be escaped using the backslash character \. Backslash characters do not need to be escaped.
- *  Commas and spaces will also need to be escaped for measurements, though equals signs = do not.
- *
- *  Further info: https://docs.influxdata.com/influxdb/v1.8/write_protocols/line_protocol_reference/
- **/
-private String escapeStringForInfluxDB(String str) {
-    if (str == null) {
-        return 'null'
-    }
-
-    str = str.replaceAll(" ", "\\\\ ") // Escape spaces.
-    str = str.replaceAll(",", "\\\\,") // Escape commas.
-    str = str.replaceAll("=", "\\\\=") // Escape equal signs.
-    str = str.replaceAll("\"", "\\\\\"") // Escape double quotes.
-
-    return str
 }
