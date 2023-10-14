@@ -5,14 +5,18 @@
     
     Note, a compatible HTTP server is required.
     Arduino code is provided as a sample here: https://github.com/arktronic/hubitat/tree/main/http-distance-sensor
+
+    v0.2 - add PowerMeter to let things like the Notifier app make use of distance measurements; change distance data type to number
+    v0.1 - initial release
 */
 
 metadata {
   definition(name: "HTTP Distance Sensor", namespace: "arktronic", author: "Sasha Kotlyar", importUrl: "https://raw.githubusercontent.com/arktronic/hubitat/main/http-distance-sensor/http-distance-sensor-driver.groovy") {
     capability "PresenceSensor"
     capability "Sensor"
+    capability "PowerMeter" // enables the use of this sensor with apps that need more "standard" capabilities
 
-    attribute "distance", "int"
+    attribute "distance", "number"
     attribute "distance_validated", "boolean"
 
     command "refresh"
@@ -50,8 +54,10 @@ def refresh() {
         if (resp.data["distance_mm"]) {
           result = resp.data["distance_mm"]
           sendEvent(name: "distance", value: result, unit: "mm", descriptionText: "Distance is ${result} mm")
+          sendEvent(name: "power", value: result)
         } else {
           device.deleteCurrentState("distance")
+          device.deleteCurrentState("power")
         }
 
         if (resp.data["distance_validated"]) {
