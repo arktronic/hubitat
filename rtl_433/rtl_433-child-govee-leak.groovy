@@ -6,6 +6,7 @@ Please see https://github.com/arktronic/hubitat/tree/main/rtl_433 for details.
 License: ISC
 
 v0.1 - Initial release
+v0.2 - Stop forcing event status changes for battery level
 
 */
 
@@ -73,9 +74,9 @@ def batteryReport(batteryOk, batteryMilliVolts) {
   state.batteryOk = batteryOk
   state.batteryMilliVolts = batteryMilliVolts
   if (batteryOk < 1)
-    sendEvent(name: "battery", value: 1, unit: "%", descriptionText: "$device.displayName battery is low ($batteryMilliVolts mV)", type: "physical", isStateChange: true)
+    sendEvent(name: "battery", value: 1, unit: "%", descriptionText: "$device.displayName battery is low ($batteryMilliVolts mV)", type: "physical")
   else
-    sendEvent(name: "battery", value: 100, unit: "%", descriptionText: "$device.displayName battery is OK ($batteryMilliVolts mV)", type: "physical", isStateChange: true)
+    sendEvent(name: "battery", value: 100, unit: "%", descriptionText: "$device.displayName battery is OK ($batteryMilliVolts mV)", type: "physical")
 }
 
 def leakDetected() {
