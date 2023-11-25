@@ -6,8 +6,7 @@
     Note, a compatible HTTP server is required.
     CircuitPython and Arduino code is provided as a sample here: https://github.com/arktronic/hubitat/tree/main/http-environment-sensors
 
-    License: ISC
-
+    v0.3 - Add option to always report radon values
     v0.2 - Add Airthings Wave Plus compatibility (radon, VOC, light level)
     v0.1 - Initial release
 */
@@ -34,6 +33,7 @@ metadata {
     input name: "targetHttpAddress", type: "string", title: "<b>Target Server HTTP Address</b>", description: "For example: http://192.168.1.23:80", required: true
     input name: "autoPoll", type: "bool", title: "Enable Auto Poll", description: "Refreshes data every 2 minutes", required: true, defaultValue: false
     input name: "radonUsePicocuriesPerLiter", type: "bool", title: "Use pCi/L for radon measurements", description: "(Otherwise, use Bq/m³)", required: true, defaultValue: true
+    input name: "radonAlwaysReport", type: "bool", title: "Always report radon measurements", description: "Forces radon information to always show even if it is 0", required: true, defaultValue: false
   }
 }
 
@@ -108,6 +108,10 @@ def refresh() {
           result = (result as double).round(2)
           rnUnit = (settings.radonUsePicocuriesPerLiter ? "pCi/L" : "Bq/m³")
           sendEvent(name: "radon", value: result, unit: rnUnit, descriptionText: "Radon level is ${result} ${rnUnit}")
+        } else if (radonAlwaysReport) {
+          result = 0
+          rnUnit = (settings.radonUsePicocuriesPerLiter ? "pCi/L" : "Bq/m³")
+          sendEvent(name: "radon", value: result, unit: rnUnit, descriptionText: "Radon level is ${result} ${rnUnit}")
         } else {
           device.deleteCurrentState("radon")
         }
@@ -115,6 +119,10 @@ def refresh() {
         if (resp.data["long_term_radon_bq_m3"]) {
           result = (resp.data["long_term_radon_bq_m3"] as int) / (radonUsePicocuriesPerLiter ? 37.0 : 1.0)
           result = (result as double).round(2)
+          rnUnit = (settings.radonUsePicocuriesPerLiter ? "pCi/L" : "Bq/m³")
+          sendEvent(name: "longTermRadon", value: result, unit: rnUnit, descriptionText: "Long term radon level is ${result} ${rnUnit}")
+        } else if (radonAlwaysReport) {
+          result = 0
           rnUnit = (settings.radonUsePicocuriesPerLiter ? "pCi/L" : "Bq/m³")
           sendEvent(name: "longTermRadon", value: result, unit: rnUnit, descriptionText: "Long term radon level is ${result} ${rnUnit}")
         } else {
