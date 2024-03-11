@@ -9,6 +9,7 @@ License: ISC
 
 v0.1 - Initial release
 v0.2 - Rework DNI and classification of devices
+v0.3 - Add custom row-mapped trigger child device type
 
 */
 
@@ -25,11 +26,16 @@ import groovy.transform.Field
   "Acurite Temperature Humidity Sensor [Acurite-Tower]": "Acurite-Tower"
 ]
 
+@Field static DEVICES_BY_MODEL = [
+  "Custom Row Mapped Trigger": "__rtl433_custom_rowmapped_trigger__"
+]
+
 @Field static ALL_DEVICES_TO_DRIVER_NAMES = [
   "Govee Water Leak Detector H5054 [Govee-Water]": "rtl_433 Child Device Govee Water Leak Detector H5054",
   "Rubicson Temperature Sensor [Rubicson-Temperature]": "rtl_433 Child Device Rubicson Temperature Sensor",
   "Generic Trigger": "rtl_433 Child Device Generic Trigger",
-  "Acurite Temperature Humidity Sensor [Acurite-Tower]": "rtl_433 Child Device Acurite Temperature Humidity Sensor"
+  "Acurite Temperature Humidity Sensor [Acurite-Tower]": "rtl_433 Child Device Acurite Temperature Humidity Sensor",
+  "Custom Row Mapped Trigger": "rtl_433 Child Device Custom Row Mapped Trigger",
 ]
 
 metadata {
@@ -47,6 +53,12 @@ metadata {
       [name:"channel *", type: "STRING", description: "Channel", required: true],
       [name:"label *", type: "STRING", description: "Friendly name for this device", required: true],
       [name:"Device type *", type: "ENUM", description: "Choose one", constraints: DEVICES_BY_ID_AND_CHANNEL.keySet(), required: true]
+    ]
+
+    command "addNewDeviceByModel", [
+      [name:"model *", type: "STRING", description: "Model", required: true],
+      [name:"label *", type: "STRING", description: "Friendly name for this device", required: true],
+      [name:"Device type *", type: "ENUM", description: "Choose one", constraints: DEVICES_BY_MODEL.keySet(), required: true]
     ]
   }
 
@@ -75,24 +87,34 @@ def configure() {
   state.hubTarget = "http://${location.hub.localIP}:39501"
 }
 
-def deriveChildDNI(String id, String deviceType) {
+def deriveChildDni(String id, String deviceType) {
   return "${device.deviceNetworkId}-type_${deviceType}-id_${id}"
 }
 
-def deriveChildDNI(String id, String channel, String deviceType) {
+def deriveChildDni(String id, String channel, String deviceType) {
   return "${device.deviceNetworkId}-type_${deviceType}-id_${id}-channel_${channel}"
+}
+
+def deriveChildDniWithModel(String model, String deviceType) {
+  return "${device.deviceNetworkId}-type_${deviceType}-model_${id}"
 }
 
 def addNewDeviceById(String id, String label, String deviceType) {
   dniTypeCode = DEVICES_BY_ID[deviceType]
   driverName = ALL_DEVICES_TO_DRIVER_NAMES[deviceType]
-  addChildDevice("arktronic", driverName, deriveChildDNI(id, dniTypeCode), [label: label])
+  addChildDevice("arktronic", driverName, deriveChildDni(id, dniTypeCode), [label: label])
 }
 
 def addNewDeviceByIdAndChannel(String id, String channel, String label, String deviceType) {
   dniTypeCode = DEVICES_BY_ID_AND_CHANNEL[deviceType]
   driverName = ALL_DEVICES_TO_DRIVER_NAMES[deviceType]
-  addChildDevice("arktronic", driverName, deriveChildDNI(id, channel, dniTypeCode), [label: label])
+  addChildDevice("arktronic", driverName, deriveChildDni(id, channel, dniTypeCode), [label: label])
+}
+
+def addNewDeviceByModel(String model, String label, String deviceType) {
+  dniTypeCode = DEVICES_BY_MODEL[deviceType]
+  driverName = ALL_DEVICES_TO_DRIVER_NAMES[deviceType]
+  addChildDevice("arktronic", driverName, deriveChildDniWithModel(model, dniTypeCode), [label: label])
 }
 
 def parse(String description) {
@@ -110,7 +132,7 @@ def parse(String description) {
     state.lastReceivedHeartbeat = json["heartbeat_rtl_433"]
     state.lastReceivedHeartbeatDate = new Date((json["heartbeat_rtl_433"] as long) * 1000).format("EEE, d MMM yyyy HH:mm:ss Z")
   } else if (jsonId && jsonModel && DEVICES_BY_ID.values().any { el -> el == jsonModel }) {
-    def childDevice = getChildDevice(deriveChildDNI(jsonId, jsonModel))
+    def childDevice = getChildDevice(deriveChildDni(jsonId, jsonModel))
     if (childDevice != null) {
       if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
       childDevice.processIncomingEvent(json["event"], json)
@@ -118,7 +140,7 @@ def parse(String description) {
       if (logEnable) log.debug "No child device found for ${jsonModel} ${jsonId}"
     }
   } else if (jsonId && jsonModel && jsonChannel && DEVICES_BY_ID_AND_CHANNEL.values().any { el -> el == jsonModel }) {
-    def childDevice = getChildDevice(deriveChildDNI(jsonId, jsonChannel, jsonModel))
+    def childDevice = getChildDevice(deriveChildDni(jsonId, jsonChannel, jsonModel))
     if (childDevice != null) {
       if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
       childDevice.processIncomingEvent(json["event"], json)
@@ -126,7 +148,13 @@ def parse(String description) {
       if (logEnable) log.debug "No child device found for ${jsonModel} ${jsonId} ${jsonChannel}"
     }
   } else if (jsonId) {
-    def childDevice = getChildDevice(deriveChildDNI(jsonId, "__rtl433_generic_trigger__"))
+    def childDevice = getChildDevice(deriveChildDni(jsonId, "__rtl433_generic_trigger__"))
+    if (childDevice != null) {
+      if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
+      childDevice.processIncomingEvent(json["event"], json)
+    }
+  } else if (jsonModel) {
+    def childDevice = getChildDevice(deriveChildDniWithModel(jsonModel, "__rtl433_custom_rowmapped_trigger__"))
     if (childDevice != null) {
       if (logEnable) log.debug "Sending message to child device: ${childDevice.getLabel()}"
       childDevice.processIncomingEvent(json["event"], json)
