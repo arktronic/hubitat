@@ -6,6 +6,7 @@ Please see https://github.com/arktronic/hubitat/tree/main/rtl_433 for details.
 License: ISC
 
 v0.1 - Initial release
+v0.2 - Attempt to fix rare debounce bug
 
 */
 
@@ -96,4 +97,5 @@ def triggerMotion() {
 
 def deactivateMotion() {
   sendEvent(name: "motion", value: "inactive", descriptionText: "$device.displayName motion is inactive", type: "physical")
+  finishDebounce()
 }
