@@ -57,6 +57,12 @@ app.MapGet("/", async (EventDb db) =>
     }
 });
 
+app.MapGet("/test", () =>
+{
+    Console.WriteLine("Test!");
+    return Results.NoContent();
+});
+
 app.MapPost("/events", async (List<HubHttpEvent> events, EventDb db) =>
 {
     try
