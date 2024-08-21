@@ -7,6 +7,7 @@ License: ISC
 
 v0.1 - Initial release
 v0.2 - Stop forcing event status changes for battery level
+v0.3 - Fix battery percentage reporting
 
 */
 
@@ -73,10 +74,8 @@ def pushButton() {
 def batteryReport(batteryOk, batteryMilliVolts) {
   state.batteryOk = batteryOk
   state.batteryMilliVolts = batteryMilliVolts
-  if (batteryOk < 1)
-    sendEvent(name: "battery", value: 1, unit: "%", descriptionText: "$device.displayName battery is low ($batteryMilliVolts mV)", type: "physical")
-  else
-    sendEvent(name: "battery", value: 100, unit: "%", descriptionText: "$device.displayName battery is OK ($batteryMilliVolts mV)", type: "physical")
+  batteryPercent = (int)(batteryOk * 100d)
+  sendEvent(name: "battery", value: batteryPercent, unit: "%", descriptionText: "$device.displayName battery is at $batteryPercent% ($batteryMilliVolts mV)", type: "physical")
 }
 
 def leakDetected() {
