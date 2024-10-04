@@ -9,11 +9,9 @@ const char* password = "your password here";
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
 #define AIRTHINGS_MAX_CONNECT_FAILURES 10
 
-#define WDT_TIMEOUT_SECS 30
-
-// uncomment this out for devices with attached screens:
-// (note: you must configure the TFT_eSPI library for your screen!)
-//#define USE_SCREEN
+// comment this out for devices without attached screens:
+// (note: you must configure the TFT_eSPI library for your screen, if you have one!)
+#define USE_SCREEN
 
 #define AIRTHINGS_BLE_SERVICE "b42e1c08-ade7-11e4-89d3-123b93f75cba"
 #define AIRTHINGS_BLE_CHARACTERISTIC "b42e2a68-ade7-11e4-89d3-123b93f75cba"
@@ -41,6 +39,10 @@ String airthingsAddress = "N/A";
 #include <SPI.h>
 #include <TFT_eSPI.h>
 TFT_eSPI tft = TFT_eSPI();
+#endif
+
+#ifndef LED_BUILTIN
+#define LED_BUILTIN 13
 #endif
 
 void sos() {
@@ -266,7 +268,12 @@ void setup() {
   delay(100);
 
   // Initialize watchdog
-  esp_task_wdt_init(WDT_TIMEOUT_SECS, true);
+  esp_task_wdt_config_t twdt_config = {
+      .timeout_ms = 30000,
+      .idle_core_mask = (1 << portNUM_PROCESSORS) - 1,    // Bitmask of all cores
+      .trigger_panic = true,
+  };
+  esp_task_wdt_init(&twdt_config);
   esp_task_wdt_add(NULL);
 
 #ifdef USE_SCREEN
