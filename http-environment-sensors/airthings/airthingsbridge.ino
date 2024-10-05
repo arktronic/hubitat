@@ -289,7 +289,7 @@ void setup() {
   Serial.print("Connecting to AP: ");
   Serial.println(ssid);
 
-  WiFi.setMinSecurity(WIFI_AUTH_WPA_PSK);
+  WiFi.setHostname("AirthingsBridge");
   WiFi.begin(ssid, password);
 
   // If Wi-Fi doesn't connect in WDT_TIMEOUT_SECS, we'll reboot and start over
