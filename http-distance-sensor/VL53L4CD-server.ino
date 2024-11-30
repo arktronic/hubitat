@@ -44,7 +44,8 @@ const char* adminPassword = "toor";
 #include <WebServer.h>
 #include <Update.h>
 
-#define FIRMWARE_VERSION "v0.1.0"
+#define FIRMWARE_NAME "VL53L4CD ToF server"
+#define FIRMWARE_VERSION "v0.1.1"
 
 #define RESULTS_TOTAL 10
 #define I2C Wire1
@@ -239,7 +240,7 @@ void initWebServer() {
       return server.requestAuthentication();
     }
     server.sendHeader("Connection", "close");
-    server.send(200, "text/html", "<div>" + String(FIRMWARE_VERSION) + "</div><br /><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Flash'></form>");
+    server.send(200, "text/html", "<div>" + String(FIRMWARE_NAME) + " " + String(FIRMWARE_VERSION) + "</div><br /><form method='POST' action='/update' enctype='multipart/form-data'><input type='file' name='update'><input type='submit' value='Flash'></form>");
   });
   server.on(
     "/update", HTTP_POST,
@@ -260,11 +261,14 @@ void initWebServer() {
 }
 
 void setup() {
+  esp_task_wdt_deinit();
   I2C.setPins(I2C_PINS);
   I2C.begin();
-  Serial.begin(115200);
+  Serial.begin(9600);
   pinMode(LED_BUILTIN, OUTPUT);
   delay(10);
+  Serial.println();
+  Serial.println("Starting up... firmware " + String(FIRMWARE_NAME) + " " + String(FIRMWARE_VERSION));
 
   // Initialize watchdog
   esp_task_wdt_config_t twdt_config = {
