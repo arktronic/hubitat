@@ -49,7 +49,7 @@ const char* adminPassword = "toor";
 #include <Update.h>
 
 #define FIRMWARE_NAME "Airthings Bridge"
-#define FIRMWARE_VERSION "v0.1.0"
+#define FIRMWARE_VERSION "v0.1.1"
 
 #define AIRTHINGS_REFRESH_TIME_MSECS (1000 * 60 * 30)
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
@@ -409,6 +409,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, password);
+  WiFi.setSleep(false);
 
   unsigned long wifiConnectStart = millis();
   bool ledOn = true;

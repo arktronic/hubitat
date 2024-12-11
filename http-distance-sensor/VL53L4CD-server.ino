@@ -45,7 +45,7 @@ const char* adminPassword = "toor";
 #include <Update.h>
 
 #define FIRMWARE_NAME "VL53L4CD ToF server"
-#define FIRMWARE_VERSION "v0.1.1"
+#define FIRMWARE_VERSION "v0.1.2"
 
 #define RESULTS_TOTAL 10
 #define I2C Wire1
@@ -283,6 +283,7 @@ void setup() {
   WiFi.mode(WIFI_STA);
   WiFi.setAutoReconnect(true);
   WiFi.begin(ssid, password);
+  WiFi.setSleep(false);
 
   unsigned long wifiConnectStart = millis();
   bool ledOn = true;
