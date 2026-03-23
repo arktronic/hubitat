@@ -6,13 +6,14 @@ See the README file for more info.
 
 Hardware requirements:
 - a WiFi- and BLE-capable ESP32 board
-- TFT screen (optional)
+- TFT screen (optional; setup tested with a LilyGo T-Display)
+- A BLE-capable Airthings device, such as Wave Plus
 
 Software requirements:
 - this file, opened in the Arduino IDE
-- the "ArduinoBLE" library (tested with version 1.3.7)
+- the "NimBLE-Arduino" library (tested with version 2.4.0)
 - the "TFT_eSPI" library (optional; tested with version 2.5.43)
-- esp32 board support (tested with version 3.0.7)
+- Espressif esp32 board support (tested with version 3.3.7)
 
 Network endpoints:
 / - shows current status as JSON, including Airthings data when available
@@ -44,21 +45,21 @@ const char* adminPassword = "toor";
 
 #include <WiFi.h>
 #include <esp_task_wdt.h>
-#include <ArduinoBLE.h>
+#include <NimBLEDevice.h>
 #include <WebServer.h>
 #include <Update.h>
 
 #define FIRMWARE_NAME "Airthings Bridge"
-#define FIRMWARE_VERSION "v0.1.1"
+#define FIRMWARE_VERSION "v0.1.2"
 
 #define AIRTHINGS_REFRESH_TIME_MSECS (1000 * 60 * 30)
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
-#define AIRTHINGS_MAX_CONNECT_FAILURES 10
+#define AIRTHINGS_MAX_CONNECT_FAILURES 15
 
 #define AIRTHINGS_BLE_SERVICE "b42e1c08-ade7-11e4-89d3-123b93f75cba"
 #define AIRTHINGS_BLE_CHARACTERISTIC "b42e2a68-ade7-11e4-89d3-123b93f75cba"
 
-BLEDevice airthingsDevice;
+const NimBLEAdvertisedDevice* advertisedAirthingsDevice = NULL;
 
 WebServer server(80);
 
@@ -258,10 +259,15 @@ void initWebServer() {
 }
 
 void findAirthingsDevice() {
-  BLEDevice dev = BLE.available();
-  if (dev) {
-    airthingsDevice = dev;
-    BLE.stopScan();
+  auto results = NimBLEDevice::getScan()->getResults();
+  if (results.getCount() < 1) return;
+  NimBLEUUID serviceUuid(AIRTHINGS_BLE_SERVICE);
+  for (int i = 0; i < results.getCount(); i++) {
+    const NimBLEAdvertisedDevice* device = results.getDevice(i);
+    if (device->isAdvertisingService(serviceUuid)) {
+      advertisedAirthingsDevice = device;
+      NimBLEDevice::getScan()->stop();
+    }
   }
 }
 
@@ -278,27 +284,31 @@ void accessAirthingsDevice() {
     unsuccessfulAttempts++;
 
     Serial.println("Connecting to Airthings");
-    if (airthingsDevice.connect()) {
+    NimBLEClient* airthingsClient = NimBLEDevice::createClient();
+    if (airthingsClient->connect(advertisedAirthingsDevice)) {
       esp_task_wdt_reset();
-      airthingsAddress = airthingsDevice.address();
+      airthingsAddress = String(airthingsClient->getPeerAddress().toString().c_str());
       Serial.println("Connected");
       Serial.println("Discovering attributes");
-      if (airthingsDevice.discoverAttributes()) {
+      if (airthingsClient->discoverAttributes()) {
         esp_task_wdt_reset();
         Serial.println("Discovered");
         unsuccessfulAttempts = 0;
-        BLEService airthingsService = airthingsDevice.service(AIRTHINGS_BLE_SERVICE);
+        NimBLERemoteService* airthingsService = airthingsClient->getService(AIRTHINGS_BLE_SERVICE);
         if (airthingsService) {
-          BLECharacteristic airthingsChar = airthingsService.characteristic(AIRTHINGS_BLE_CHARACTERISTIC);
+          NimBLEUUID airthingsCharUuid(AIRTHINGS_BLE_CHARACTERISTIC);
+          NimBLERemoteCharacteristic* airthingsChar = airthingsService->getCharacteristic(airthingsCharUuid);
           if (airthingsChar) {
-            if (airthingsChar.readValue(airthingsBuffer, sizeof(airthingsBuffer)) > 0) {
+            std::string val = airthingsChar->readValue();
+            if (val.length() >= 4) {
+              memcpy(airthingsBuffer, val.data(), sizeof(airthingsBuffer));
               esp_task_wdt_reset();
               Serial.println("Success");
               unsuccessfulAttempts = 0;
-              airthingsDevice.disconnect();
+              NimBLEDevice::deleteClient(airthingsClient);
               return;
             } else {
-              Serial.println("Characteristic read did not return any data");
+              Serial.println("Characteristic read did not return valid data");
             }
           } else {
             Serial.println("Airthings characteristic is unavailable");
@@ -309,7 +319,7 @@ void accessAirthingsDevice() {
       } else {
         Serial.println("Discovery failed");
       }
-      airthingsDevice.disconnect();
+      NimBLEDevice::deleteClient(airthingsClient);
       unsuccessfulAttempts++;
     } else {
       esp_task_wdt_reset();
@@ -319,7 +329,7 @@ void accessAirthingsDevice() {
 }
 
 void processBleTasks() {
-  if (!airthingsDevice) {
+  if (!advertisedAirthingsDevice) {
     findAirthingsDevice();
   } else {
     accessAirthingsDevice();
@@ -431,15 +441,18 @@ void setup() {
   if (WiFi.status() != WL_CONNECTED) {
     sos();
   }
-  Serial.println("Connected!");
+  Serial.println("Connected! Initializing web server...");
+  initWebServer();
 
   digitalWrite(LED_BUILTIN, LOW);
-  initWebServer();
 
   esp_task_wdt_reset();
 
-  BLE.begin();
-  BLE.scanForUuid(AIRTHINGS_BLE_SERVICE);
+  Serial.println("Initializing BLE...");
+  NimBLEDevice::init("");
+  Serial.println("Scanning for Airthings...");
+  NimBLEDevice::getScan()->setActiveScan(true);
+  NimBLEDevice::getScan()->start(0);
 }
 
 void loop() {
