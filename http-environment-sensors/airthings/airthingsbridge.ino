@@ -50,11 +50,12 @@ const char* adminPassword = "toor";
 #include <Update.h>
 
 #define FIRMWARE_NAME "Airthings Bridge"
-#define FIRMWARE_VERSION "v0.1.2"
+#define FIRMWARE_VERSION "v0.1.3"
 
 #define AIRTHINGS_REFRESH_TIME_MSECS (1000 * 60 * 30)
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
 #define AIRTHINGS_MAX_CONNECT_FAILURES 15
+#define AIRTHINGS_MAX_FAILURES_BEFORE_RESCAN 5
 
 #define AIRTHINGS_BLE_SERVICE "b42e1c08-ade7-11e4-89d3-123b93f75cba"
 #define AIRTHINGS_BLE_CHARACTERISTIC "b42e2a68-ade7-11e4-89d3-123b93f75cba"
@@ -279,7 +280,14 @@ void accessAirthingsDevice() {
     sos();
   }
 
-  if (lastAttempt == 0 || millis() < lastAttempt || millis() > lastAttempt + AIRTHINGS_REFRESH_TIME_MSECS || (unsuccessfulAttempts > 0 && lastAttempt + AIRTHINGS_RETRY_MSECS > millis())) {
+  if (unsuccessfulAttempts > AIRTHINGS_MAX_FAILURES_BEFORE_RESCAN) {
+    Serial.println("Too many unsuccessful attempts, going back to scanning for Airthings...");
+    advertisedAirthingsDevice = NULL;
+    NimBLEDevice::getScan()->start(0);
+    return;
+  }
+
+  if (lastAttempt == 0 || millis() < lastAttempt || millis() > lastAttempt + AIRTHINGS_REFRESH_TIME_MSECS || (unsuccessfulAttempts > 0 && lastAttempt + AIRTHINGS_RETRY_MSECS < millis())) {
     lastAttempt = millis();
     unsuccessfulAttempts++;
 
@@ -323,6 +331,7 @@ void accessAirthingsDevice() {
       unsuccessfulAttempts++;
     } else {
       esp_task_wdt_reset();
+      NimBLEDevice::deleteClient(airthingsClient);
       Serial.println("Connection failed");
     }
   }
