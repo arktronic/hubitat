@@ -14,7 +14,7 @@ Because radon monitoring is important, and there don't appear to be any ZigBee o
 - ESP32 dev board, with or without an attached screen - NOTE: ESP32-S2 devices cannot be used, as they have no Bluetooth support!
 - USB-C cable and power adapter (code is **not** optimized for battery power at all!)
 
-This setup has been tested with a LilyGo/TTGO T-Display.
+This setup has been tested with a LilyGo/TTGO T-Display as well as T-Display-S3.
 
 ## Software
 
