@@ -38,6 +38,9 @@ const char* adminPassword = "toor";
 // (note: you must configure the TFT_eSPI library for your screen, if you have one!)
 #define USE_SCREEN
 
+// BOOT button on most ESP32 boards (active LOW)
+#define BUTTON_PIN 0
+
 // -----------------------------------------
 // CONFIGURATION END
 // -----------------------------------------
@@ -50,11 +53,11 @@ const char* adminPassword = "toor";
 #include <Update.h>
 
 #define FIRMWARE_NAME "Airthings Bridge"
-#define FIRMWARE_VERSION "v0.1.4"
+#define FIRMWARE_VERSION "v0.1.5"
 
 #define AIRTHINGS_REFRESH_TIME_MSECS (1000 * 60 * 30)
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
-#define AIRTHINGS_MAX_CONNECT_FAILURES 15
+#define AIRTHINGS_MAX_CONNECT_FAILURES 20
 #define AIRTHINGS_SCAN_MSECS (1000 * 10)
 
 #define AIRTHINGS_BLE_SERVICE "b42e1c08-ade7-11e4-89d3-123b93f75cba"
@@ -77,6 +80,8 @@ struct AirthingsData {
 byte airthingsBuffer[20] = {0};
 AirthingsData* currentAirthingsData = (AirthingsData*)&airthingsBuffer;
 String airthingsAddress = "N/A";
+String airthingsInfoText = "N/A";
+unsigned long airthingsLastSuccess = 0;
 
 #ifdef USE_SCREEN
 #include <SPI.h>
@@ -260,14 +265,104 @@ void initWebServer() {
 // Scan for Airthings, connect, read data, disconnect.
 // Always does a fresh BLE scan so we never use a stale address.
 void pollAirthings() {
-  static unsigned long lastSuccess = 0;
   static int consecutiveFailures = 0;
+  static bool scanning = false;
+
+  if (scanning) {
+    NimBLEScan* scan = NimBLEDevice::getScan();
+    if (scan->isScanning()) {
+      return; // still scanning, wait for it to finish
+    }
+
+    scanning = false;
+
+    NimBLEAddress deviceAddress("00:00:00:00:00:00", 0);
+    NimBLEUUID serviceUuid(AIRTHINGS_BLE_SERVICE);
+    auto results = scan->getResults();
+    for (int i = 0; i < results.getCount(); i++) {
+        const NimBLEAdvertisedDevice* device = results.getDevice(i);
+        if (device->isAdvertisingService(serviceUuid)) {
+        Serial.println("Found Airthings device: " + String(device->getAddress().toString().c_str()));
+        deviceAddress = device->getAddress();
+        break;
+        }
+    }
+    scan->clearResults();
+
+    if (deviceAddress.isNull()) {
+        Serial.println("Airthings device not found in scan");
+        consecutiveFailures++;
+        return;
+    }
+
+    Serial.println("Connecting to Airthings: " + String(deviceAddress.toString().c_str()));
+    airthingsInfoText = "Connecting, attempt " + String(consecutiveFailures + 1);
+    NimBLEClient* client = NimBLEDevice::createClient();
+
+    client->setConnectTimeout(25000);
+    esp_task_wdt_reset();
+    if (!client->connect(deviceAddress)) {
+        Serial.println("Connection failed");
+        NimBLEDevice::deleteClient(client);
+        consecutiveFailures++;
+        esp_task_wdt_reset();
+        return;
+    }
+
+    esp_task_wdt_reset();
+    airthingsAddress = String(client->getPeerAddress().toString().c_str());
+    Serial.println("Connected, discovering attributes...");
+    airthingsInfoText = "Connected, querying...";
+
+    if (!client->discoverAttributes()) {
+        Serial.println("Discovery failed");
+        NimBLEDevice::deleteClient(client);
+        consecutiveFailures++;
+        return;
+    }
+
+    esp_task_wdt_reset();
+
+    NimBLERemoteService* service = client->getService(AIRTHINGS_BLE_SERVICE);
+    if (!service) {
+        Serial.println("Airthings service is unavailable");
+        NimBLEDevice::deleteClient(client);
+        consecutiveFailures++;
+        return;
+    }
+    esp_task_wdt_reset();
+
+    NimBLERemoteCharacteristic* characteristic = service->getCharacteristic(AIRTHINGS_BLE_CHARACTERISTIC);
+    if (!characteristic) {
+        Serial.println("Airthings characteristic is unavailable");
+        NimBLEDevice::deleteClient(client);
+        consecutiveFailures++;
+        return;
+    }
+
+    std::string val = characteristic->readValue();
+    NimBLEDevice::deleteClient(client);
+
+    if (val.length() < 4) {
+        Serial.println("Characteristic read did not return valid data");
+        consecutiveFailures++;
+        return;
+    }
+
+    memcpy(airthingsBuffer, val.data(), sizeof(airthingsBuffer));
+    esp_task_wdt_reset();
+    Serial.println("Success");
+    airthingsInfoText = airthingsAddress;
+    consecutiveFailures = 0;
+    airthingsLastSuccess = millis();
+    return;
+  }
 
   // Check if it's time to poll
-  bool isFirstRun = (lastSuccess == 0);
-  bool timerWrapped = (millis() < lastSuccess);
-  bool refreshDue = (millis() > lastSuccess + AIRTHINGS_REFRESH_TIME_MSECS);
-  bool retryDue = (consecutiveFailures > 0 && millis() > lastSuccess + AIRTHINGS_RETRY_MSECS);
+  bool isFirstRun = (airthingsLastSuccess == 0);
+  bool timerWrapped = (millis() < airthingsLastSuccess);
+  bool refreshDue = (millis() > airthingsLastSuccess + AIRTHINGS_REFRESH_TIME_MSECS);
+  bool retryDue = (consecutiveFailures > 0 && millis() > airthingsLastSuccess + AIRTHINGS_RETRY_MSECS);
   if (!isFirstRun && !timerWrapped && !refreshDue && !retryDue) {
     return;
   }
@@ -276,93 +371,13 @@ void pollAirthings() {
     sos();
   }
 
-  // --- Step 1: Scan for the Airthings device ---
   Serial.println("Scanning for Airthings...");
+  airthingsInfoText = "Scanning, attempt " + String(consecutiveFailures + 1);
   NimBLEScan* scan = NimBLEDevice::getScan();
   scan->setActiveScan(true);
   esp_task_wdt_reset();
   scan->start(AIRTHINGS_SCAN_MSECS, false);
-  while (scan->isScanning()) {
-    delay(100);
-    esp_task_wdt_reset();
-  }
-
-  NimBLEAddress deviceAddress("00:00:00:00:00:00", 0);
-  NimBLEUUID serviceUuid(AIRTHINGS_BLE_SERVICE);
-  auto results = scan->getResults();
-  for (int i = 0; i < results.getCount(); i++) {
-    const NimBLEAdvertisedDevice* device = results.getDevice(i);
-    if (device->isAdvertisingService(serviceUuid)) {
-      Serial.println("Found Airthings device: " + String(device->getAddress().toString().c_str()));
-      deviceAddress = device->getAddress();
-      break;
-    }
-  }
-  scan->clearResults();
-
-  if (deviceAddress.isNull()) {
-    Serial.println("Airthings device not found in scan");
-    consecutiveFailures++;
-    return;
-  }
-
-  // --- Step 2: Connect and read data ---
-  Serial.println("Connecting to Airthings: " + String(deviceAddress.toString().c_str()));
-  NimBLEClient* client = NimBLEDevice::createClient();
-
-  if (!client->connect(deviceAddress)) {
-    Serial.println("Connection failed");
-    NimBLEDevice::deleteClient(client);
-    consecutiveFailures++;
-    esp_task_wdt_reset();
-    return;
-  }
-
-  esp_task_wdt_reset();
-  airthingsAddress = String(client->getPeerAddress().toString().c_str());
-  Serial.println("Connected, discovering attributes...");
-
-  if (!client->discoverAttributes()) {
-    Serial.println("Discovery failed");
-    NimBLEDevice::deleteClient(client);
-    consecutiveFailures++;
-    return;
-  }
-
-  esp_task_wdt_reset();
-
-  NimBLERemoteService* service = client->getService(AIRTHINGS_BLE_SERVICE);
-  if (!service) {
-    Serial.println("Airthings service is unavailable");
-    NimBLEDevice::deleteClient(client);
-    consecutiveFailures++;
-    return;
-  }
-  esp_task_wdt_reset();
-
-  NimBLERemoteCharacteristic* characteristic = service->getCharacteristic(AIRTHINGS_BLE_CHARACTERISTIC);
-  if (!characteristic) {
-    Serial.println("Airthings characteristic is unavailable");
-    NimBLEDevice::deleteClient(client);
-    consecutiveFailures++;
-    return;
-  }
-
-  std::string val = characteristic->readValue();
-  NimBLEDevice::deleteClient(client);
-
-  if (val.length() < 4) {
-    Serial.println("Characteristic read did not return valid data");
-    consecutiveFailures++;
-    return;
-  }
-
-  // --- Step 3: Store results ---
-  memcpy(airthingsBuffer, val.data(), sizeof(airthingsBuffer));
-  esp_task_wdt_reset();
-  Serial.println("Success");
-  consecutiveFailures = 0;
-  lastSuccess = millis();
+  scanning = true;
 }
 
 #ifdef USE_SCREEN
@@ -381,7 +396,7 @@ void updateScreenInfo() {
   tft.println(String("IP: ") + WiFi.localIP().toString());
 
   tft.setCursor(0, 20, 2);
-  tft.println(String("Airthings: ") + airthingsAddress);
+  tft.println(String("Airthings: ") + airthingsInfoText);
 
   if (currentAirthingsData->version == 1) {
     if (metric) {
@@ -419,6 +434,7 @@ void setup() {
   Serial.println();
   Serial.println("Starting up... firmware " + String(FIRMWARE_NAME) + " " + String(FIRMWARE_VERSION));
   pinMode(LED_BUILTIN, OUTPUT);
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
   delay(100);
 
   // Initialize watchdog
@@ -474,11 +490,6 @@ void setup() {
     sos();
   }
 
-#ifdef USE_SCREEN
-  tft.setCursor(0, 60, 2);
-  tft.println(String("IP: ") + WiFi.localIP().toString());
-#endif
-
   Serial.println("Connected! Initializing web server...");
   initWebServer();
 
@@ -492,6 +503,10 @@ void setup() {
 
 void loop() {
   esp_task_wdt_reset();
+  if (digitalRead(BUTTON_PIN) == LOW) {
+    airthingsLastSuccess = 0;
+    airthingsInfoText = "Reconnecting...";
+  }
   pollAirthings();
 #ifdef USE_SCREEN
   updateScreenInfo();
