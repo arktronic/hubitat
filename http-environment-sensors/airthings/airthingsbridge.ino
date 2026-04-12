@@ -11,7 +11,7 @@ Hardware requirements:
 
 Software requirements:
 - this file, opened in the Arduino IDE
-- the "NimBLE-Arduino" library (tested with version 2.4.0)
+- the "NimBLE-Arduino" library (tested with version 2.5.0)
 - the "TFT_eSPI" library (optional; tested with version 2.5.43)
 - Espressif esp32 board support (tested with version 3.3.7)
 
@@ -53,12 +53,14 @@ const char* adminPassword = "toor";
 #include <Update.h>
 
 #define FIRMWARE_NAME "Airthings Bridge"
-#define FIRMWARE_VERSION "v0.1.5"
+#define FIRMWARE_VERSION "v0.1.6"
 
 #define AIRTHINGS_REFRESH_TIME_MSECS (1000 * 60 * 30)
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
 #define AIRTHINGS_MAX_CONNECT_FAILURES 20
 #define AIRTHINGS_SCAN_MSECS (1000 * 10)
+#define AIRTHINGS_DISCOVERY_RETRIES 5
+#define AIRTHINGS_DISCOVERY_RETRY_MSECS (1000 * 3)
 
 #define AIRTHINGS_BLE_SERVICE "b42e1c08-ade7-11e4-89d3-123b93f75cba"
 #define AIRTHINGS_BLE_CHARACTERISTIC "b42e2a68-ade7-11e4-89d3-123b93f75cba"
@@ -314,10 +316,26 @@ void pollAirthings() {
     Serial.println("Connected, discovering attributes...");
     airthingsInfoText = "Connected, querying...";
 
-    if (!client->discoverAttributes()) {
-        Serial.println("Discovery failed");
+    bool discovered = false;
+    for (int discoveryAttempt = 0; discoveryAttempt < AIRTHINGS_DISCOVERY_RETRIES; discoveryAttempt++) {
+        if (discoveryAttempt > 0) {
+            Serial.printf("Discovery retry %d of %d...\n", discoveryAttempt + 1, AIRTHINGS_DISCOVERY_RETRIES);
+            esp_task_wdt_reset();
+            delay(AIRTHINGS_DISCOVERY_RETRY_MSECS);
+            esp_task_wdt_reset();
+        }
+        if (client->discoverAttributes()) {
+            discovered = true;
+            break;
+        }
+        Serial.printf("Discovery failed (attempt %d of %d)\n", discoveryAttempt + 1, AIRTHINGS_DISCOVERY_RETRIES);
+    }
+
+    if (!discovered) {
+        client->disconnect();
         NimBLEDevice::deleteClient(client);
         consecutiveFailures++;
+        esp_task_wdt_reset();
         return;
     }
 
