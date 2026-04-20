@@ -53,7 +53,7 @@ const char* adminPassword = "toor";
 #include <Update.h>
 
 #define FIRMWARE_NAME "Airthings Bridge"
-#define FIRMWARE_VERSION "v0.1.6"
+#define FIRMWARE_VERSION "v0.1.7"
 
 #define AIRTHINGS_REFRESH_TIME_MSECS (1000 * 60 * 30)
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
@@ -269,6 +269,7 @@ void initWebServer() {
 void pollAirthings() {
   static int consecutiveFailures = 0;
   static bool scanning = false;
+  static unsigned long lastAttemptTime = 0;
 
   if (scanning) {
     NimBLEScan* scan = NimBLEDevice::getScan();
@@ -344,6 +345,7 @@ void pollAirthings() {
     NimBLERemoteService* service = client->getService(AIRTHINGS_BLE_SERVICE);
     if (!service) {
         Serial.println("Airthings service is unavailable");
+        client->disconnect();
         NimBLEDevice::deleteClient(client);
         consecutiveFailures++;
         return;
@@ -353,12 +355,14 @@ void pollAirthings() {
     NimBLERemoteCharacteristic* characteristic = service->getCharacteristic(AIRTHINGS_BLE_CHARACTERISTIC);
     if (!characteristic) {
         Serial.println("Airthings characteristic is unavailable");
+        client->disconnect();
         NimBLEDevice::deleteClient(client);
         consecutiveFailures++;
         return;
     }
 
     std::string val = characteristic->readValue();
+    client->disconnect();
     NimBLEDevice::deleteClient(client);
 
     if (val.length() < 4) {
@@ -380,7 +384,7 @@ void pollAirthings() {
   bool isFirstRun = (airthingsLastSuccess == 0);
   bool timerWrapped = (millis() < airthingsLastSuccess);
   bool refreshDue = (millis() > airthingsLastSuccess + AIRTHINGS_REFRESH_TIME_MSECS);
-  bool retryDue = (consecutiveFailures > 0 && millis() > airthingsLastSuccess + AIRTHINGS_RETRY_MSECS);
+  bool retryDue = (consecutiveFailures > 0 && millis() > lastAttemptTime + AIRTHINGS_RETRY_MSECS);
   if (!isFirstRun && !timerWrapped && !refreshDue && !retryDue) {
     return;
   }
@@ -389,6 +393,7 @@ void pollAirthings() {
     sos();
   }
 
+  lastAttemptTime = millis();
   Serial.println("Scanning for Airthings...");
   airthingsInfoText = "Scanning, attempt " + String(consecutiveFailures + 1);
   NimBLEScan* scan = NimBLEDevice::getScan();
@@ -517,6 +522,8 @@ void setup() {
 
   Serial.println("Initializing BLE...");
   NimBLEDevice::init("");
+  NimBLEDevice::setSecurityAuth(true, false, true);
+  NimBLEDevice::setSecurityIOCap(BLE_HS_IO_NO_INPUT_OUTPUT);
 }
 
 void loop() {
