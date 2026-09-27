@@ -11,9 +11,9 @@ Hardware requirements:
 
 Software requirements:
 - this file, opened in the Arduino IDE
-- the "NimBLE-Arduino" library (tested with version 2.5.0)
+- the "NimBLE-Arduino" library (tested with version 2.5.1)
 - the "TFT_eSPI" library (optional; tested with version 2.5.43)
-- Espressif esp32 board support (tested with version 3.3.7)
+- Espressif esp32 board support (tested with version 3.3.12)
 
 Network endpoints:
 / - shows current status as JSON, including Airthings data when available
@@ -52,8 +52,16 @@ const char* adminPassword = "toor";
 #include <WebServer.h>
 #include <Update.h>
 
+#ifndef CONFIG_IDF_TARGET
+#define CONFIG_IDF_TARGET "unknown"
+#endif
+
+#ifndef ARDUINO_BOARD
+#define ARDUINO_BOARD "unknown"
+#endif
+
 #define FIRMWARE_NAME "Airthings Bridge"
-#define FIRMWARE_VERSION "v0.1.7"
+#define FIRMWARE_VERSION "v0.1.8"
 
 #define AIRTHINGS_REFRESH_TIME_MSECS (1000 * 60 * 30)
 #define AIRTHINGS_RETRY_MSECS (1000 * 30)
@@ -64,6 +72,9 @@ const char* adminPassword = "toor";
 
 #define AIRTHINGS_BLE_SERVICE "b42e1c08-ade7-11e4-89d3-123b93f75cba"
 #define AIRTHINGS_BLE_CHARACTERISTIC "b42e2a68-ade7-11e4-89d3-123b93f75cba"
+#define AIRTHINGS_BLE_COMMAND_CHARACTERISTIC "b42e2d06-ade7-11e4-89d3-123b93f75cba"
+#define AIRTHINGS_BATTERY_RESPONSE_LENGTH 30
+#define AIRTHINGS_BATTERY_VALUE_OFFSET 26
 
 WebServer server(80);
 
@@ -84,6 +95,11 @@ AirthingsData* currentAirthingsData = (AirthingsData*)&airthingsBuffer;
 String airthingsAddress = "N/A";
 String airthingsInfoText = "N/A";
 unsigned long airthingsLastSuccess = 0;
+uint8_t airthingsBatteryResponse[AIRTHINGS_BATTERY_RESPONSE_LENGTH] = {0};
+volatile size_t airthingsBatteryResponseLength = 0;
+volatile bool airthingsBatteryResponseReceived = false;
+int airthingsBatteryPercent = -1;
+bool airthingsForcePoll = false;
 
 #ifdef USE_SCREEN
 #include <SPI.h>
@@ -150,6 +166,76 @@ void sos() {
   while(true);
 }
 
+void onAirthingsBatteryNotification(NimBLERemoteCharacteristic*, uint8_t* data, size_t length, bool) {
+  if (airthingsBatteryResponseReceived || airthingsBatteryResponseLength >= sizeof(airthingsBatteryResponse)) {
+    return;
+  }
+
+  size_t bytesToCopy = length;
+  if (bytesToCopy > sizeof(airthingsBatteryResponse) - airthingsBatteryResponseLength) {
+    bytesToCopy = sizeof(airthingsBatteryResponse) - airthingsBatteryResponseLength;
+  }
+  memcpy(airthingsBatteryResponse + airthingsBatteryResponseLength, data, bytesToCopy);
+  airthingsBatteryResponseLength += bytesToCopy;
+  if (airthingsBatteryResponseLength == sizeof(airthingsBatteryResponse)) {
+    airthingsBatteryResponseReceived = true;
+  }
+}
+
+int interpolateBatteryPercent(float voltage, float lowVoltage, float highVoltage, int lowPercent, int highPercent) {
+  float percent = (voltage - lowVoltage) / (highVoltage - lowVoltage) * (highPercent - lowPercent) + lowPercent;
+  return (int)(percent + 0.5f);
+}
+
+int wavePlusBatteryPercent(float voltage) {
+  if (voltage >= 3.00f) return 100;
+  if (voltage >= 2.80f) return interpolateBatteryPercent(voltage, 2.80f, 3.00f, 81, 100);
+  if (voltage >= 2.60f) return interpolateBatteryPercent(voltage, 2.60f, 2.80f, 53, 81);
+  if (voltage >= 2.50f) return interpolateBatteryPercent(voltage, 2.50f, 2.60f, 28, 53);
+  if (voltage >= 2.20f) return interpolateBatteryPercent(voltage, 2.20f, 2.50f, 5, 28);
+  if (voltage >= 2.10f) return interpolateBatteryPercent(voltage, 2.10f, 2.20f, 0, 5);
+  return 0;
+}
+
+bool readAirthingsBatteryLevel(NimBLERemoteService* service) {
+  NimBLERemoteCharacteristic* characteristic = service->getCharacteristic(AIRTHINGS_BLE_COMMAND_CHARACTERISTIC);
+  if (!characteristic || (!characteristic->canNotify() && !characteristic->canIndicate()) || (!characteristic->canWrite() && !characteristic->canWriteNoResponse())) {
+    return false;
+  }
+
+  bool useNotifications = characteristic->canNotify();
+  airthingsBatteryResponseLength = 0;
+  airthingsBatteryResponseReceived = false;
+  if (!characteristic->subscribe(useNotifications, onAirthingsBatteryNotification)) {
+    return false;
+  }
+
+  const uint8_t request = 0x6d;
+  bool commandSent = false;
+  if (characteristic->canWrite()) {
+    commandSent = characteristic->writeValue(&request, sizeof(request), true);
+  }
+  if (!commandSent && characteristic->canWriteNoResponse()) {
+    commandSent = characteristic->writeValue(&request, sizeof(request), false);
+  }
+
+  unsigned long waitStart = millis();
+  while (commandSent && !airthingsBatteryResponseReceived && millis() - waitStart < 5000) {
+    esp_task_wdt_reset();
+    delay(10);
+  }
+  characteristic->unsubscribe();
+
+  if (!commandSent || !airthingsBatteryResponseReceived || airthingsBatteryResponse[0] != request) {
+    return false;
+  }
+
+  uint16_t millivolts = airthingsBatteryResponse[AIRTHINGS_BATTERY_VALUE_OFFSET]
+      | ((uint16_t)airthingsBatteryResponse[AIRTHINGS_BATTERY_VALUE_OFFSET + 1] << 8);
+  airthingsBatteryPercent = wavePlusBatteryPercent(millivolts / 1000.0f);
+  return true;
+}
+
 void sendStatus() {
   String result = "{";
   result += "\"last_airthings_address\":\"" + String(airthingsAddress) + "\",";
@@ -162,10 +248,18 @@ void sendStatus() {
     result += "\"pressure_hpa\":" + String(currentAirthingsData->pressure / 50.0) + ",";
     result += "\"co2_ppm\":" + String(currentAirthingsData->co2) + ",";
     result += "\"voc_ppb\":" + String(currentAirthingsData->voc) + ",";
+    if (airthingsBatteryPercent >= 0) {
+      result += "\"battery_percent\":" + String(airthingsBatteryPercent) + ",";
+    }
   }
   result += "\"debug_free_heap\":" + String((int)ESP.getFreeHeap()) + ",";
   result += "\"debug_free_psram\":" + String((int)ESP.getFreePsram()) + ",";
   result += "\"debug_uptime_hrs\":" + String((double)1 * millis() / 3600000) + ",";
+  result += "\"mcu_model\":\"" + String(ESP.getChipModel()) + "\",";
+  result += "\"mcu_target\":\"" + String(CONFIG_IDF_TARGET) + "\",";
+  result += "\"board_id\":\"" + String(ARDUINO_BOARD) + "\",";
+  result += "\"chip_revision\":" + String(ESP.getChipRevision()) + ",";
+  result += "\"cpu_mhz\":" + String(ESP.getCpuFreqMHz()) + ",";
   result += "\"fw\":\"" + String(FIRMWARE_VERSION) + "\"}";
 
   esp_task_wdt_reset();
@@ -278,6 +372,7 @@ void pollAirthings() {
     }
 
     scanning = false;
+    airthingsForcePoll = false;
 
     NimBLEAddress deviceAddress("00:00:00:00:00:00", 0);
     NimBLEUUID serviceUuid(AIRTHINGS_BLE_SERVICE);
@@ -295,6 +390,7 @@ void pollAirthings() {
     if (deviceAddress.isNull()) {
         Serial.println("Airthings device not found in scan");
         consecutiveFailures++;
+        lastAttemptTime = millis();
         return;
     }
 
@@ -308,6 +404,7 @@ void pollAirthings() {
         Serial.println("Connection failed");
         NimBLEDevice::deleteClient(client);
         consecutiveFailures++;
+        lastAttemptTime = millis();
         esp_task_wdt_reset();
         return;
     }
@@ -336,6 +433,7 @@ void pollAirthings() {
         client->disconnect();
         NimBLEDevice::deleteClient(client);
         consecutiveFailures++;
+        lastAttemptTime = millis();
         esp_task_wdt_reset();
         return;
     }
@@ -348,6 +446,7 @@ void pollAirthings() {
         client->disconnect();
         NimBLEDevice::deleteClient(client);
         consecutiveFailures++;
+        lastAttemptTime = millis();
         return;
     }
     esp_task_wdt_reset();
@@ -358,16 +457,22 @@ void pollAirthings() {
         client->disconnect();
         NimBLEDevice::deleteClient(client);
         consecutiveFailures++;
+        lastAttemptTime = millis();
         return;
     }
 
     std::string val = characteristic->readValue();
+    bool validPayload = val.length() == sizeof(airthingsBuffer) && (uint8_t)val[0] == 1;
+    if (validPayload && !readAirthingsBatteryLevel(service)) {
+      Serial.println("Battery level is unavailable");
+    }
     client->disconnect();
     NimBLEDevice::deleteClient(client);
 
-    if (val.length() < 4) {
+    if (!validPayload) {
         Serial.println("Characteristic read did not return valid data");
         consecutiveFailures++;
+        lastAttemptTime = millis();
         return;
     }
 
@@ -381,13 +486,14 @@ void pollAirthings() {
   }
 
   // Check if it's time to poll
-  bool isFirstRun = (airthingsLastSuccess == 0);
-  bool timerWrapped = (millis() < airthingsLastSuccess);
-  bool refreshDue = (millis() > airthingsLastSuccess + AIRTHINGS_REFRESH_TIME_MSECS);
-  bool retryDue = (consecutiveFailures > 0 && millis() > lastAttemptTime + AIRTHINGS_RETRY_MSECS);
-  if (!isFirstRun && !timerWrapped && !refreshDue && !retryDue) {
+  unsigned long now = millis();
+  bool isFirstRun = (airthingsLastSuccess == 0 && consecutiveFailures == 0);
+  bool refreshDue = (airthingsLastSuccess > 0 && now - airthingsLastSuccess >= AIRTHINGS_REFRESH_TIME_MSECS);
+  bool retryDue = (consecutiveFailures > 0 && now - lastAttemptTime >= AIRTHINGS_RETRY_MSECS);
+  if (!airthingsForcePoll && !isFirstRun && !refreshDue && !retryDue) {
     return;
   }
+  airthingsForcePoll = false;
 
   if (consecutiveFailures > AIRTHINGS_MAX_CONNECT_FAILURES) {
     sos();
@@ -444,6 +550,11 @@ void updateScreenInfo() {
 
     tft.setCursor(0, 100, 2);
     tft.println(String("Humidity: ") + currentAirthingsData->humidity / 2.0 + String(" %"));
+
+    if (airthingsBatteryPercent >= 0) {
+      tft.setCursor(0, 118, 2);
+      tft.println(String("Battery: ") + airthingsBatteryPercent + String(" %"));
+    }
   }
 
   metric = !metric;
@@ -529,7 +640,7 @@ void setup() {
 void loop() {
   esp_task_wdt_reset();
   if (digitalRead(BUTTON_PIN) == LOW) {
-    airthingsLastSuccess = 0;
+    airthingsForcePoll = true;
     airthingsInfoText = "Reconnecting...";
   }
   pollAirthings();

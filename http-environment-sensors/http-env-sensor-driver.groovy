@@ -6,6 +6,7 @@
     Note, a compatible HTTP server is required.
     CircuitPython and Arduino code is provided as a sample here: https://github.com/arktronic/hubitat/tree/main/http-environment-sensors
 
+    v0.4 - Add battery reporting
     v0.3 - Add option to always report radon values
     v0.2 - Add Airthings Wave Plus compatibility (radon, VOC, light level)
     v0.1 - Initial release
@@ -19,6 +20,7 @@ metadata {
     capability "PressureMeasurement"
     capability "AirQuality"
     capability "Sensor"
+    capability "Battery"
     capability "CarbonDioxideMeasurement"
     capability "IlluminanceMeasurement"
     
@@ -141,6 +143,11 @@ def refresh() {
           sendEvent(name: "illuminance", value: result, descriptionText: "Light level is ${result}")
         } else {
           device.deleteCurrentState("illuminance")
+        }
+
+        if (resp.data["battery_percent"] != null) {
+          result = (resp.data["battery_percent"] as int)
+          sendEvent(name: "battery", value: result, unit: "%", descriptionText: "Battery is ${result}%")
         }
 
         resp.data.each { key, val ->
